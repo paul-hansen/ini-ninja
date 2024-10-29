@@ -21,7 +21,7 @@ pub struct IniParser {
     pub comment_delimiters: &'static [char],
     pub trailing_comments: bool,
     pub value_start_delimiters: &'static [char],
-    pub multiline: bool,
+    pub line_continuation: bool,
     pub duplicate_keys: DuplicateKeyStrategy,
 }
 
@@ -32,7 +32,9 @@ impl Default for IniParser {
             comment_delimiters: &['#', ';'],
             trailing_comments: true,
             value_start_delimiters: &['='],
-            multiline: true,
+            // If true, any lines that end with `\` will consider the next line part of the
+            // current line. This allows multiline values.
+            line_continuation: true,
             duplicate_keys: DuplicateKeyStrategy::default(),
         }
     }
@@ -114,7 +116,20 @@ impl IniParser {
             let Some(line) = lines.next() else {
                 break;
             };
-            let line = line?;
+            let mut line = line?;
+            if let Some(line2) = line.strip_suffix('\\') {
+                line = line2.to_string();
+                for next_line in lines.by_ref() {
+                    let next_line = next_line?;
+                    let next_line = next_line.trim_start();
+                    line.push_str(next_line);
+                    if let Some(line2) = line.strip_suffix('\\') {
+                        line = line2.to_string();
+                    } else {
+                        break;
+                    }
+                }
+            }
             if let Some(this_section) = try_section(&line) {
                 if let Some(section) = &section {
                     in_section = *section == this_section;
@@ -211,13 +226,13 @@ impl IniParser {
         Ok(value)
     }
 
-    /// Given a string, check if it could be a 
+    /// Given a string, check if it could be a
     fn try_value(&self, name: &str, line: &str) -> Option<RangeInclusive<usize>> {
         let name = name.trim();
         // Since comments are always at the end of the line, it won't change the positions to
         // remove them.
         let line = line
-            .split_once(&*self.comment_delimiters)
+            .split_once(self.comment_delimiters)
             .map(|x| x.0)
             .unwrap_or(line);
 
@@ -295,10 +310,7 @@ mod tests {
 
     #[test]
     fn test_try_section_no_comment() {
-        assert_eq!(
-            try_section("[SECTION]"),
-            Some("SECTION")
-        );
+        assert_eq!(try_section("[SECTION]"), Some("SECTION"));
     }
 
     #[test]
@@ -311,10 +323,7 @@ mod tests {
 
     #[test]
     fn test_try_section_whitespace() {
-        assert_eq!(
-            try_section("[ SECTION ]"),
-            Some("SECTION")
-        );
+        assert_eq!(try_section("[ SECTION ]"), Some("SECTION"));
     }
 
     #[test]
@@ -340,6 +349,9 @@ mod tests {
         email = "test@example.com"
         # duplicate entry
         email = "test2@example.com"
+        description = some longer description that \
+        takes multiple lines \
+        sometimes more than two
 
         [ database auth ] # whitespace around section names will be removed
         password=password ; an unquoted string
@@ -362,6 +374,20 @@ mod tests {
         let value = parser.read_async(reader, None, "user").await.unwrap();
         assert_eq!(value, Some("tom".to_string()));
     }
+    #[test]
+    fn test_get_value_multiline() {
+        let parser = IniParser::default();
+
+        let reader = std::io::Cursor::new(TEST_INI);
+        let value = parser.read(reader, Some("contact"), "description").unwrap();
+        assert_eq!(
+            value,
+            Some(
+                "some longer description that takes multiple lines sometimes more than two"
+                    .to_string()
+            )
+        );
+    }
 
     #[test]
     fn test_get_value_section() {
@@ -380,7 +406,8 @@ mod tests {
 
         let reader = std::io::Cursor::new(TEST_INI);
         let value = parser
-            .read_async(reader, Some("database auth"), "password").await
+            .read_async(reader, Some("database auth"), "password")
+            .await
             .unwrap();
         assert_eq!(value, Some("password".to_string()));
     }
@@ -390,9 +417,7 @@ mod tests {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser
-            .read(reader, Some("contact"), "email")
-            .unwrap();
+        let value = parser.read(reader, Some("contact"), "email").unwrap();
         assert_eq!(value, Some("test2@example.com".to_string()));
     }
 
@@ -403,9 +428,7 @@ mod tests {
             ..Default::default()
         };
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser
-            .read(reader, Some("contact"), "email")
-            .unwrap();
+        let value = parser.read(reader, Some("contact"), "email").unwrap();
         assert_eq!(value, Some("test@example.com".to_string()));
 
         let parser = IniParser {
@@ -413,8 +436,7 @@ mod tests {
             ..Default::default()
         };
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser
-            .read::<String>(reader, Some("contact"), "email");
+        let value = parser.read::<String>(reader, Some("contact"), "email");
         assert!(value.is_err());
     }
 

@@ -303,17 +303,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_try_section_not() {
+    fn try_section_not() {
         assert_eq!(try_section("This is a line"), None);
     }
 
     #[test]
-    fn test_try_section_no_comment() {
+    fn try_section_no_comment() {
         assert_eq!(try_section("[SECTION]"), Some("SECTION"));
     }
 
     #[test]
-    fn test_try_section_comment() {
+    fn try_section_comment() {
         assert_eq!(
             try_section("[SECTION] # This is a comment"),
             Some("SECTION")
@@ -321,12 +321,12 @@ mod tests {
     }
 
     #[test]
-    fn test_try_section_whitespace() {
+    fn try_section_whitespace() {
         assert_eq!(try_section("[ SECTION ]"), Some("SECTION"));
     }
 
     #[test]
-    fn test_try_value() {
+    fn try_value() {
         let name = "  Name=John Doe  ".to_string();
         let parser = IniParser::default();
 
@@ -360,7 +360,7 @@ mod tests {
         "#;
 
     #[test]
-    fn test_get_value_no_section() {
+    fn get_value_no_section() {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);
@@ -369,7 +369,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_value_no_section_async() {
+    async fn get_value_no_section_async() {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);
@@ -378,7 +378,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_value_multiline() {
+    fn get_value_multiline() {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);
@@ -395,7 +395,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_value_section() {
+    fn get_value_section() {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);
@@ -406,7 +406,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_value_section_async() {
+    async fn get_value_section_async() {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);
@@ -418,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_quoted_value() {
+    fn get_quoted_value() {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);
@@ -427,7 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_duplicate_value_first() {
+    fn get_duplicate_value_first() {
         let parser = IniParser {
             duplicate_keys: DuplicateKeyStrategy::UseFirst,
             ..Default::default()
@@ -438,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_duplicate_value_last() {
+    fn get_duplicate_value_last() {
         let parser = IniParser {
             duplicate_keys: DuplicateKeyStrategy::UseLast,
             ..Default::default()
@@ -449,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_duplicate_value_error() {
+    fn get_duplicate_value_error() {
         let parser = IniParser {
             duplicate_keys: DuplicateKeyStrategy::Error,
             ..Default::default()
@@ -460,7 +460,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_value_async() {
+    async fn get_value_async() {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);

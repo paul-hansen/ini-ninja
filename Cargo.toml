@@ -2,5 +2,10 @@
 name = "ini_get_set"
 version = "0.1.0"
 edition = "2021"
+resolver = "2"
 
 [dependencies]
+tokio = { version = "1.41.0", default-features = false, features = ["io-util"] }
+
+[dev-dependencies]
+tokio = { version = "1.41.0", features = ["io-util", "test-util", "macros"] }

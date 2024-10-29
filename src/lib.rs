@@ -1,36 +1,39 @@
 #![allow(dead_code)]
 use std::{
-    io::{self, BufRead, BufReader, Read},
+    io::{self, Read},
     ops::RangeInclusive,
     str::FromStr,
 };
 
+use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
+
 #[derive(Default, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum DuplicateStrategy {
+pub enum DuplicateKeyStrategy {
     #[default]
-    Last,
-    First,
+    UseLast,
+    UseFirst,
     Error,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct IniParser {
     /// These characters indicate the start of a comment.
-    pub comment_delimiters: Vec<char>,
+    pub comment_delimiters: &'static [char],
     pub trailing_comments: bool,
-    pub value_start_delimiters: Vec<char>,
+    pub value_start_delimiters: &'static [char],
     pub multiline: bool,
-    pub duplicate_strategy: DuplicateStrategy,
+    pub duplicate_keys: DuplicateKeyStrategy,
 }
 
 impl Default for IniParser {
+    /// The defaults are chosen to be compatible with the widest range of ini formats.
     fn default() -> Self {
         Self {
-            comment_delimiters: vec!['#', ';'],
-            trailing_comments: false,
-            value_start_delimiters: vec!['='],
+            comment_delimiters: &['#', ';'],
+            trailing_comments: true,
+            value_start_delimiters: &['='],
             multiline: true,
-            duplicate_strategy: DuplicateStrategy::default(),
+            duplicate_keys: DuplicateKeyStrategy::default(),
         }
     }
 }
@@ -48,7 +51,9 @@ impl<T> From<io::Error> for ParseError<T> {
 }
 
 impl IniParser {
-    pub fn read_parsed<T>(
+    /// Read a value from a INI file source.
+    /// If section is none, it will look in the global space.
+    pub fn read<T>(
         &self,
         source: impl Read,
         section: Option<&str>,
@@ -57,36 +62,33 @@ impl IniParser {
     where
         T: FromStr,
     {
-        let value = self.value_quotes_removed(source, section, name)?;
+        let value = self.value_unaltered(source, section, name)?;
         let Some(value) = value else {
             return Ok(None);
         };
+        let value = trim_whitespace_and_quotes(&value);
         let value = value.parse::<T>().map_err(ParseError::Parse)?;
         Ok(Some(value))
     }
 
-    pub fn read_string(
+    /// Read a value from an async INI file source.
+    /// If section is none, it will look in the global space.
+    pub async fn read_async<T>(
         &self,
-        source: impl Read,
+        source: impl AsyncRead,
         section: Option<&str>,
         name: &str,
-    ) -> io::Result<Option<String>> {
-        self.value_quotes_removed(source, section, name)
-    }
-
-    fn value_quotes_removed(
-        &self,
-        source: impl Read,
-        section: Option<&str>,
-        name: &str,
-    ) -> io::Result<Option<String>> {
-        let value = self.value_unaltered(source, section, name)?.map(|s| {
-            let s = s.trim();
-            let s = s.strip_prefix('"').unwrap_or(s);
-            let s = s.strip_suffix('"').unwrap_or(s);
-            s.to_string()
-        });
-        Ok(value)
+    ) -> Result<Option<T>, ParseError<<T as FromStr>::Err>>
+    where
+        T: FromStr,
+    {
+        let value = self.value_unaltered_async(source, section, name).await?;
+        let Some(value) = value else {
+            return Ok(None);
+        };
+        let value = trim_whitespace_and_quotes(&value);
+        let value = value.parse::<T>().map_err(ParseError::Parse)?;
+        Ok(Some(value))
     }
 
     /// Returns the value for the given section and name without any parsing. Notably this may
@@ -100,15 +102,18 @@ impl IniParser {
         section: Option<&str>,
         name: &str,
     ) -> io::Result<Option<String>> {
-        let buffer = BufReader::new(source);
+        let buffer = std::io::BufReader::new(source);
 
         // Are we in the section we are looking for?
         // Starts in the global namespace, so if section is none it starts as true, changing as we
         // parse different sections.
         let mut in_section = section.is_none();
         let mut value = None;
-
-        for line in buffer.lines() {
+        let mut lines = io::BufRead::lines(buffer);
+        loop {
+            let Some(line) = lines.next() else {
+                break;
+            };
             let line = line?;
             if let Some(this_section) = try_section(&line) {
                 if let Some(section) = &section {
@@ -121,20 +126,82 @@ impl IniParser {
                 continue;
             } else if in_section {
                 if let Some(range) = self.try_value(name, &line) {
-                    match self.duplicate_strategy {
-                        DuplicateStrategy::Error => {
+                    match self.duplicate_keys {
+                        DuplicateKeyStrategy::Error => {
                             if value.is_some() {
                                 return Err(io::Error::new(
                                     io::ErrorKind::AlreadyExists,
-                                    format!("{}{name} is defined twice", section.map(|s|format!("[{s}].")).unwrap_or_default()),
+                                    format!(
+                                        "{}{name} is defined twice",
+                                        section.map(|s| format!("[{s}].")).unwrap_or_default()
+                                    ),
                                 ));
                             }
                             value = Some(line[range].to_string());
                         }
-                        DuplicateStrategy::Last => {
+                        DuplicateKeyStrategy::UseLast => {
                             value = Some(line[range].to_string());
                         }
-                        DuplicateStrategy::First => {
+                        DuplicateKeyStrategy::UseFirst => {
+                            return Ok(Some(line[range].to_string()));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(value)
+    }
+    /// Returns the value for the given section and name without any parsing. Notably this may
+    /// still have quotation marks around strings. Leading and trailing whitespace will still be
+    /// stripped though.
+    ///
+    /// Usually only use this if you are manually parsing something.
+    async fn value_unaltered_async(
+        &self,
+        source: impl AsyncRead,
+        section: Option<&str>,
+        name: &str,
+    ) -> io::Result<Option<String>> {
+        let buffer = Box::pin(BufReader::new(source));
+
+        // Are we in the section we are looking for?
+        // Starts in the global namespace, so if section is none it starts as true, changing as we
+        // parse different sections.
+        let mut in_section = section.is_none();
+        let mut value = None;
+        let mut lines = buffer.lines();
+        loop {
+            let Some(line) = lines.next_line().await? else {
+                break;
+            };
+            if let Some(this_section) = try_section(&line) {
+                if let Some(section) = &section {
+                    in_section = *section == this_section;
+                } else {
+                    // If section is None, we are looking for a global variable.
+                    // Since this_section is some here, we know we aren't in the global section
+                    in_section = false;
+                }
+                continue;
+            } else if in_section {
+                if let Some(range) = self.try_value(name, &line) {
+                    match self.duplicate_keys {
+                        DuplicateKeyStrategy::Error => {
+                            if value.is_some() {
+                                return Err(io::Error::new(
+                                    io::ErrorKind::AlreadyExists,
+                                    format!(
+                                        "{}{name} is defined twice",
+                                        section.map(|s| format!("[{s}].")).unwrap_or_default()
+                                    ),
+                                ));
+                            }
+                            value = Some(line[range].to_string());
+                        }
+                        DuplicateKeyStrategy::UseLast => {
+                            value = Some(line[range].to_string());
+                        }
+                        DuplicateKeyStrategy::UseFirst => {
                             return Ok(Some(line[range].to_string()));
                         }
                     }
@@ -144,6 +211,7 @@ impl IniParser {
         Ok(value)
     }
 
+    /// Given a string, check if it could be a 
     fn try_value(&self, name: &str, line: &str) -> Option<RangeInclusive<usize>> {
         let name = name.trim();
         // Since comments are always at the end of the line, it won't change the positions to
@@ -203,10 +271,17 @@ fn try_section(line: &str) -> Option<&str> {
     let trimmed = line.trim();
     if trimmed.starts_with('[') {
         let end = trimmed.find(']')?;
-        Some(&trimmed[1..end])
+        let section_name = &trimmed[1..end];
+        Some(section_name.trim())
     } else {
         None
     }
+}
+fn trim_whitespace_and_quotes(text: &str) -> &str {
+    let text = text.trim();
+    let text = text.strip_prefix('"').unwrap_or(text);
+    let text = text.strip_suffix('"').unwrap_or(text);
+    text
 }
 
 #[cfg(test)]
@@ -214,9 +289,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_try_section() {
+    fn test_try_section_not() {
         assert_eq!(try_section("This is a line"), None);
-        assert_eq!(try_section("[SECTION] This is a line"), Some("SECTION"));
+    }
+
+    #[test]
+    fn test_try_section_no_comment() {
+        assert_eq!(
+            try_section("[SECTION]"),
+            Some("SECTION")
+        );
+    }
+
+    #[test]
+    fn test_try_section_comment() {
+        assert_eq!(
+            try_section("[SECTION] # This is a comment"),
+            Some("SECTION")
+        );
+    }
+
+    #[test]
+    fn test_try_section_whitespace() {
+        assert_eq!(
+            try_section("[ SECTION ]"),
+            Some("SECTION")
+        );
     }
 
     #[test]
@@ -234,43 +332,133 @@ mod tests {
         new_name.push_str(&name[*value_range.end()..]);
         assert_eq!(new_name, "  Name=Ender Wiggins  ");
     }
+
     const TEST_INI: &str = r#"
         user="tom"
-        [info]
+        [contact]
+        # quoted string
         email = "test@example.com"
+        # duplicate entry
         email = "test2@example.com"
-        password=password
+
+        [ database auth ] # whitespace around section names will be removed
+        password=password ; an unquoted string
         "#;
+
     #[test]
-    fn test_get_value() {
+    fn test_get_value_no_section() {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read_parsed(reader, None, "user").unwrap();
+        let value = parser.read(reader, None, "user").unwrap();
+        assert_eq!(value, Some("tom".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_get_value_no_section_async() {
+        let parser = IniParser::default();
+
+        let reader = std::io::Cursor::new(TEST_INI);
+        let value = parser.read_async(reader, None, "user").await.unwrap();
+        assert_eq!(value, Some("tom".to_string()));
+    }
+
+    #[test]
+    fn test_get_value_section() {
+        let parser = IniParser::default();
+
+        let reader = std::io::Cursor::new(TEST_INI);
+        let value = parser
+            .read(reader, Some("database auth"), "password")
+            .unwrap();
+        assert_eq!(value, Some("password".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_get_value_section_async() {
+        let parser = IniParser::default();
+
+        let reader = std::io::Cursor::new(TEST_INI);
+        let value = parser
+            .read_async(reader, Some("database auth"), "password").await
+            .unwrap();
+        assert_eq!(value, Some("password".to_string()));
+    }
+
+    #[test]
+    fn test_get_quoted_value() {
+        let parser = IniParser::default();
+
+        let reader = std::io::Cursor::new(TEST_INI);
+        let value = parser
+            .read(reader, Some("contact"), "email")
+            .unwrap();
+        assert_eq!(value, Some("test2@example.com".to_string()));
+    }
+
+    #[test]
+    fn test_get_duplicate_value() {
+        let parser = IniParser {
+            duplicate_keys: DuplicateKeyStrategy::UseFirst,
+            ..Default::default()
+        };
+        let reader = std::io::Cursor::new(TEST_INI);
+        let value = parser
+            .read(reader, Some("contact"), "email")
+            .unwrap();
+        assert_eq!(value, Some("test@example.com".to_string()));
+
+        let parser = IniParser {
+            duplicate_keys: DuplicateKeyStrategy::Error,
+            ..Default::default()
+        };
+        let reader = std::io::Cursor::new(TEST_INI);
+        let value = parser
+            .read::<String>(reader, Some("contact"), "email");
+        assert!(value.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_value_async() {
+        let parser = IniParser::default();
+
+        let reader = std::io::Cursor::new(TEST_INI);
+        let value = parser.read_async(reader, None, "user").await.unwrap();
         assert_eq!(value, Some("tom".to_string()));
 
         let reader = std::io::Cursor::new(TEST_INI);
         let value = parser
-            .read_parsed(reader, Some("info"), "password")
+            .read_async(reader, Some("database auth"), "password")
+            .await
             .unwrap();
         assert_eq!(value, Some("password".to_string()));
 
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read_parsed(reader, Some("info"), "email").unwrap();
+        let value = parser
+            .read_async(reader, Some("contact"), "email")
+            .await
+            .unwrap();
         assert_eq!(value, Some("test2@example.com".to_string()));
 
-        let parser = IniParser{
-            duplicate_strategy: DuplicateStrategy::First,
-            ..Default::default()};
+        let parser = IniParser {
+            duplicate_keys: DuplicateKeyStrategy::UseFirst,
+            ..Default::default()
+        };
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read_parsed(reader, Some("info"), "email").unwrap();
+        let value = parser
+            .read_async(reader, Some("contact"), "email")
+            .await
+            .unwrap();
         assert_eq!(value, Some("test@example.com".to_string()));
 
-        let parser = IniParser{
-            duplicate_strategy: DuplicateStrategy::Error,
-            ..Default::default()};
+        let parser = IniParser {
+            duplicate_keys: DuplicateKeyStrategy::Error,
+            ..Default::default()
+        };
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read_parsed::<String>(reader, Some("info"), "email");
+        let value = parser
+            .read_async::<String>(reader, Some("contact"), "email")
+            .await;
         assert!(value.is_err());
     }
 }

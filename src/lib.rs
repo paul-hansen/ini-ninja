@@ -57,7 +57,7 @@ impl<T> From<io::Error> for ParseError<T> {
 impl IniParser {
     /// Read a value from a INI file source.
     /// If section is none, it will look in the global space.
-    pub fn read<T>(
+    pub fn read_value<T>(
         &self,
         source: impl Read,
         section: Option<&str>,
@@ -77,7 +77,7 @@ impl IniParser {
 
     /// Read a value from an async INI file source.
     /// If section is none, it will look in the global space.
-    pub async fn read_async<T>(
+    pub async fn read_value_async<T>(
         &self,
         source: impl AsyncRead,
         section: Option<&str>,
@@ -132,38 +132,9 @@ impl IniParser {
                     }
                 }
             }
-            if let Some(this_section) = try_section(&line) {
-                if let Some(section) = &section {
-                    in_section = *section == this_section;
-                } else {
-                    // If section is None, we are looking for a global variable.
-                    // Since this_section is some here, we know we aren't in the global section
-                    in_section = false;
-                }
-                continue;
-            } else if in_section {
-                if let Some(range) = self.try_value(name, &line) {
-                    match self.duplicate_keys {
-                        DuplicateKeyStrategy::Error => {
-                            if value.is_some() {
-                                return Err(io::Error::new(
-                                    io::ErrorKind::AlreadyExists,
-                                    format!(
-                                        "{}{name} is defined twice",
-                                        section.map(|s| format!("[{s}].")).unwrap_or_default()
-                                    ),
-                                ));
-                            }
-                            value = Some(line[range].to_string());
-                        }
-                        DuplicateKeyStrategy::UseLast => {
-                            value = Some(line[range].to_string());
-                        }
-                        DuplicateKeyStrategy::UseFirst => {
-                            return Ok(Some(line[range].to_string()));
-                        }
-                    }
-                }
+            self.process_line(line, section, name, &mut in_section, &mut value)?;
+            if self.duplicate_keys == DuplicateKeyStrategy::UseFirst && value.is_some(){
+                return Ok(value);
             }
         }
         Ok(value)
@@ -191,41 +162,69 @@ impl IniParser {
             let Some(line) = lines.next_line().await? else {
                 break;
             };
-            if let Some(this_section) = try_section(&line) {
-                if let Some(section) = &section {
-                    in_section = *section == this_section;
-                } else {
-                    // If section is None, we are looking for a global variable.
-                    // Since this_section is some here, we know we aren't in the global section
-                    in_section = false;
+            let mut line = line;
+            // Handle line continuation
+            if let Some(line2) = line.strip_suffix('\\') {
+                line = line2.to_string();
+                while let Some(next_line) = lines.next_line().await? {
+                    let next_line = next_line.trim_start();
+                    line.push_str(next_line);
+                    if let Some(line2) = line.strip_suffix('\\') {
+                        line = line2.to_string();
+                    } else {
+                        break;
+                    }
                 }
-                continue;
-            } else if in_section {
-                if let Some(range) = self.try_value(name, &line) {
-                    match self.duplicate_keys {
-                        DuplicateKeyStrategy::Error => {
-                            if value.is_some() {
-                                return Err(io::Error::new(
-                                    io::ErrorKind::AlreadyExists,
-                                    format!(
-                                        "{}{name} is defined twice",
-                                        section.map(|s| format!("[{s}].")).unwrap_or_default()
-                                    ),
-                                ));
-                            }
-                            value = Some(line[range].to_string());
+            }
+            self.process_line(line, section, name, &mut in_section, &mut value)?;
+            if self.duplicate_keys == DuplicateKeyStrategy::UseFirst && value.is_some(){
+                return Ok(value);
+            }
+        }
+        Ok(value)
+    }
+
+    /// Mainly used to extract common functionality between async and sync implementations.
+    fn process_line(
+        &self,
+        line: String,
+        section: Option<&str>,
+        name: &str,
+        in_section: &mut bool,
+        value: &mut Option<String>,
+    ) -> io::Result<bool> {
+        if let Some(this_section) = try_section(&line) {
+            if let Some(section) = &section {
+                *in_section = *section == this_section;
+            } else {
+                // If section is None, we are looking for a global variable.
+                // Since this_section is some here, we know we aren't in the global section
+                *in_section = false;
+            }
+            return Ok(true);
+        } else if *in_section {
+            if let Some(range) = self.try_value(name, &line) {
+                match self.duplicate_keys {
+                    DuplicateKeyStrategy::Error => {
+                        if value.is_some() {
+                            return Err(io::Error::new(
+                                io::ErrorKind::AlreadyExists,
+                                format!(
+                                    "{}{name} is defined twice",
+                                    section.map(|s| format!("[{s}].")).unwrap_or_default()
+                                ),
+                            ));
                         }
-                        DuplicateKeyStrategy::UseLast => {
-                            value = Some(line[range].to_string());
-                        }
-                        DuplicateKeyStrategy::UseFirst => {
-                            return Ok(Some(line[range].to_string()));
-                        }
+                        *value = Some(line[range].to_string());
+                    }
+                    _ => {
+                        *value = Some(line[range].to_string());
                     }
                 }
             }
         }
-        Ok(value)
+
+        Ok(false)
     }
 
     /// Given a string, check if it could be a
@@ -273,10 +272,7 @@ impl IniParser {
             {
                 value_end -= 1;
             }
-            Some(
-                line.char_indices().nth(value_start)?.0
-                    ..=line.char_indices().nth(value_end)?.0,
-            )
+            Some(line.char_indices().nth(value_start)?.0..=line.char_indices().nth(value_end)?.0)
         } else {
             // If there isn't a value delimiter, there's no value.
             None
@@ -358,6 +354,9 @@ mod tests {
 
         [ database auth ] # whitespace around section names will be removed
         password=password ; an unquoted string
+
+        [ contact ] # duplicated section to show that DuplicateKeyStrategy::UseLast picks this up
+        email = "test3@example.com"
         "#;
 
     #[test]
@@ -365,7 +364,7 @@ mod tests {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read(reader, None, "user").unwrap();
+        let value = parser.read_value(reader, None, "user").unwrap();
         assert_eq!(value, Some("tom".to_string()));
     }
 
@@ -374,15 +373,18 @@ mod tests {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read_async(reader, None, "user").await.unwrap();
+        let value = parser.read_value_async(reader, None, "user").await.unwrap();
         assert_eq!(value, Some("tom".to_string()));
     }
+
     #[test]
     fn test_get_value_multiline() {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read(reader, Some("contact"), "description").unwrap();
+        let value = parser
+            .read_value(reader, Some("contact"), "description")
+            .unwrap();
         assert_eq!(
             value,
             Some(
@@ -398,7 +400,7 @@ mod tests {
 
         let reader = std::io::Cursor::new(TEST_INI);
         let value = parser
-            .read(reader, Some("database auth"), "password")
+            .read_value(reader, Some("database auth"), "password")
             .unwrap();
         assert_eq!(value, Some("password".to_string()));
     }
@@ -409,7 +411,7 @@ mod tests {
 
         let reader = std::io::Cursor::new(TEST_INI);
         let value = parser
-            .read_async(reader, Some("database auth"), "password")
+            .read_value_async(reader, Some("database auth"), "password")
             .await
             .unwrap();
         assert_eq!(value, Some("password".to_string()));
@@ -420,26 +422,40 @@ mod tests {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read(reader, Some("contact"), "email").unwrap();
-        assert_eq!(value, Some("test2@example.com".to_string()));
+        let value = parser.read_value(reader, Some("contact"), "email").unwrap();
+        assert_eq!(value, Some("test3@example.com".to_string()));
     }
 
     #[test]
-    fn test_get_duplicate_value() {
+    fn test_get_duplicate_value_first() {
         let parser = IniParser {
             duplicate_keys: DuplicateKeyStrategy::UseFirst,
             ..Default::default()
         };
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read(reader, Some("contact"), "email").unwrap();
+        let value = parser.read_value(reader, Some("contact"), "email").unwrap();
         assert_eq!(value, Some("test@example.com".to_string()));
+    }
 
+    #[test]
+    fn test_get_duplicate_value_last() {
+        let parser = IniParser {
+            duplicate_keys: DuplicateKeyStrategy::UseLast,
+            ..Default::default()
+        };
+        let reader = std::io::Cursor::new(TEST_INI);
+        let value = parser.read_value(reader, Some("contact"), "email").unwrap();
+        assert_eq!(value, Some("test3@example.com".to_string()));
+    }
+
+    #[test]
+    fn test_get_duplicate_value_error() {
         let parser = IniParser {
             duplicate_keys: DuplicateKeyStrategy::Error,
             ..Default::default()
         };
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read::<String>(reader, Some("contact"), "email");
+        let value = parser.read_value::<String>(reader, Some("contact"), "email");
         assert!(value.is_err());
     }
 
@@ -448,22 +464,22 @@ mod tests {
         let parser = IniParser::default();
 
         let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read_async(reader, None, "user").await.unwrap();
+        let value = parser.read_value_async(reader, None, "user").await.unwrap();
         assert_eq!(value, Some("tom".to_string()));
 
         let reader = std::io::Cursor::new(TEST_INI);
         let value = parser
-            .read_async(reader, Some("database auth"), "password")
+            .read_value_async(reader, Some("database auth"), "password")
             .await
             .unwrap();
         assert_eq!(value, Some("password".to_string()));
 
         let reader = std::io::Cursor::new(TEST_INI);
         let value = parser
-            .read_async(reader, Some("contact"), "email")
+            .read_value_async(reader, Some("contact"), "email")
             .await
             .unwrap();
-        assert_eq!(value, Some("test2@example.com".to_string()));
+        assert_eq!(value, Some("test3@example.com".to_string()));
 
         let parser = IniParser {
             duplicate_keys: DuplicateKeyStrategy::UseFirst,
@@ -471,7 +487,7 @@ mod tests {
         };
         let reader = std::io::Cursor::new(TEST_INI);
         let value = parser
-            .read_async(reader, Some("contact"), "email")
+            .read_value_async(reader, Some("contact"), "email")
             .await
             .unwrap();
         assert_eq!(value, Some("test@example.com".to_string()));
@@ -482,7 +498,7 @@ mod tests {
         };
         let reader = std::io::Cursor::new(TEST_INI);
         let value = parser
-            .read_async::<String>(reader, Some("contact"), "email")
+            .read_value_async::<String>(reader, Some("contact"), "email")
             .await;
         assert!(value.is_err());
     }

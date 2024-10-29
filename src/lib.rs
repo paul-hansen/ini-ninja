@@ -1,4 +1,6 @@
-#![allow(dead_code)]
+#![deny(clippy::unwrap_used)]
+#![deny(clippy::expect_used)]
+#![deny(clippy::panic)]
 use std::{
     io::{self, Read},
     ops::RangeInclusive,
@@ -241,7 +243,7 @@ impl IniParser {
             .position(|c| self.value_start_delimiters.contains(&c))
         {
             let this_name = line
-                .split_at(line.char_indices().nth(delimiter_index).unwrap().0)
+                .split_at(line.char_indices().nth(delimiter_index)?.0)
                 .0
                 .trim();
             if this_name != name {
@@ -272,8 +274,8 @@ impl IniParser {
                 value_end -= 1;
             }
             Some(
-                line.char_indices().nth(value_start).unwrap().0
-                    ..=line.char_indices().nth(value_end).unwrap().0,
+                line.char_indices().nth(value_start)?.0
+                    ..=line.char_indices().nth(value_end)?.0,
             )
         } else {
             // If there isn't a value delimiter, there's no value.
@@ -301,6 +303,7 @@ fn trim_whitespace_and_quotes(text: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     #[test]

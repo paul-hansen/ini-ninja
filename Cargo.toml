@@ -1,5 +1,5 @@
 [package]
-name = "ini_get_set"
+name = "ini-ninja"
 version = "0.1.0"
 edition = "2021"
 resolver = "2"

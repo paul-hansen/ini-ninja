@@ -2,16 +2,18 @@
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 #![deny(clippy::panic)]
+mod error;
 use std::{
     io::{self, Read},
     ops::RangeInclusive,
     str::FromStr,
 };
 
+use error::Error;
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 
 pub trait FromIniStr: Sized {
-    type Err;
+    type Err: std::error::Error + 'static;
     fn from_ini_str(ini_str: &str) -> Result<Self, Self::Err>;
 }
 
@@ -95,18 +97,6 @@ impl Default for IniParser {
     }
 }
 
-#[derive(Debug)]
-pub enum ParseError<F> {
-    Io(io::Error),
-    Parse(F),
-}
-
-impl<T> From<io::Error> for ParseError<T> {
-    fn from(value: io::Error) -> Self {
-        Self::Io(value)
-    }
-}
-
 impl IniParser {
     /// Read a value from a INI file source.
     /// If section is none, it will look in the global space.
@@ -115,7 +105,7 @@ impl IniParser {
         source: impl Read,
         section: Option<&str>,
         name: &str,
-    ) -> Result<Option<T>, ParseError<<T as FromIniStr>::Err>>
+    ) -> Result<Option<T>, Error>
     where
         T: FromIniStr,
     {
@@ -123,7 +113,7 @@ impl IniParser {
         let Some(value) = value else {
             return Ok(None);
         };
-        let value = FromIniStr::from_ini_str(&value).map_err(ParseError::Parse)?;
+        let value = FromIniStr::from_ini_str(&value).map_err(Error::new_parse)?;
         Ok(Some(value))
     }
 
@@ -134,7 +124,7 @@ impl IniParser {
         source: impl AsyncRead,
         section: Option<&str>,
         name: &str,
-    ) -> Result<Option<T>, ParseError<<T as FromIniStr>::Err>>
+    ) -> Result<Option<T>, Error>
     where
         T: FromIniStr,
     {
@@ -142,7 +132,7 @@ impl IniParser {
         let Some(value) = value else {
             return Ok(None);
         };
-        let value = FromIniStr::from_ini_str(&value).map_err(ParseError::Parse)?;
+        let value = FromIniStr::from_ini_str(&value).map_err(Error::new_parse)?;
         Ok(Some(value))
     }
 
@@ -156,7 +146,7 @@ impl IniParser {
         source: impl Read,
         section: Option<&str>,
         name: &str,
-    ) -> io::Result<Option<String>> {
+    ) -> Result<Option<String>, Error> {
         let buffer = std::io::BufReader::new(source);
 
         // Are we in the section we are looking for?
@@ -200,7 +190,7 @@ impl IniParser {
         source: impl AsyncRead,
         section: Option<&str>,
         name: &str,
-    ) -> io::Result<Option<String>> {
+    ) -> Result<Option<String>, Error> {
         let buffer = Box::pin(BufReader::new(source));
 
         // Are we in the section we are looking for?
@@ -243,7 +233,7 @@ impl IniParser {
         name: &str,
         in_section: &mut bool,
         value: &mut Option<String>,
-    ) -> io::Result<bool> {
+    ) -> Result<bool, Error> {
         if let Some(this_section) = try_section(&line) {
             if let Some(section) = &section {
                 *in_section = *section == this_section;
@@ -258,13 +248,10 @@ impl IniParser {
                 match self.duplicate_keys {
                     DuplicateKeyStrategy::Error => {
                         if value.is_some() {
-                            return Err(io::Error::new(
-                                io::ErrorKind::AlreadyExists,
-                                format!(
-                                    "{}{name} is defined twice",
-                                    section.map(|s| format!("[{s}].")).unwrap_or_default()
-                                ),
-                            ));
+                            return Err(Error::DuplicateKey {
+                                name: name.to_string(),
+                                section: section.map(|s| s.to_owned()),
+                            });
                         }
                         *value = Some(line[range].to_string());
                     }
@@ -278,7 +265,8 @@ impl IniParser {
         Ok(false)
     }
 
-    /// Given a string, check if it could be a
+    /// Given a string, check try to parse as a key value and return the range of the string that
+    /// contains the value.
     fn try_value(&self, name: &str, line: &str) -> Option<RangeInclusive<usize>> {
         let name = name.trim();
         // Since comments are always at the end of the line, it won't change the positions to
@@ -530,7 +518,7 @@ mod tests {
         "#,
         Some("user"),
         "is_admin",
-        Err::<Option<bool>, _>(ParseError::Parse(_))
+        Err::<Option<bool>, _>(Error::Parse(_))
     }
 
     get_value_matches! {
@@ -643,6 +631,6 @@ mod tests {
         DUPLICATE_INI,
         Some("contact"),
         "email",
-        Err::<Option<String>, _>(ParseError::Io(_))
+        Err::<Option<String>, _>(Error::DuplicateKey{..})
     }
 }

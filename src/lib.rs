@@ -133,7 +133,7 @@ impl IniParser {
                 }
             }
             self.process_line(line, section, name, &mut in_section, &mut value)?;
-            if self.duplicate_keys == DuplicateKeyStrategy::UseFirst && value.is_some(){
+            if self.duplicate_keys == DuplicateKeyStrategy::UseFirst && value.is_some() {
                 return Ok(value);
             }
         }
@@ -177,7 +177,7 @@ impl IniParser {
                 }
             }
             self.process_line(line, section, name, &mut in_section, &mut value)?;
-            if self.duplicate_keys == DuplicateKeyStrategy::UseFirst && value.is_some(){
+            if self.duplicate_keys == DuplicateKeyStrategy::UseFirst && value.is_some() {
                 return Ok(value);
             }
         }
@@ -300,6 +300,71 @@ fn trim_whitespace_and_quotes(text: &str) -> &str {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
+    use ::paste::paste;
+
+    /// Generate async and sync versions of tests that get values from a given ini
+    #[macro_export]
+    macro_rules! get_value_eq {
+        {
+            $test_name:ident,
+            $parser:expr,
+            $ini_file_string:expr,
+            $section:expr,
+            $key:expr,
+            $expected:expr
+        } => {
+            #[test]
+            fn $test_name() {
+                let parser = $parser;
+                let reader = std::io::Cursor::new($ini_file_string);
+                let value = parser.read_value(reader, $section, $key).unwrap();
+                assert_eq!(value, $expected);
+            }
+
+            paste! {
+                #[tokio::test]
+                async fn [<$test_name _async>]() {
+                    let parser = $parser;
+                    let reader = std::io::Cursor::new($ini_file_string);
+                    let value = parser.read_value_async(reader, $section, $key).await.unwrap();
+                    assert_eq!(value, $expected);
+                }
+            }
+        };
+    }
+
+    /// Generate async and sync versions of tests that get values from a given ini and assert that
+    /// the result matches a pattern. Useful for partially matching errors.
+    #[macro_export]
+    macro_rules! get_value_matches {
+        {
+            $test_name:ident,
+            $parser:expr,
+            $ini_file_string:expr,
+            $section:expr,
+            $key:expr,
+            $expected:pat
+        } => {
+            #[test]
+            fn $test_name() {
+                let parser = $parser;
+                let reader = std::io::Cursor::new($ini_file_string);
+                let value = parser.read_value(reader, $section, $key);
+                ::assert_matches::assert_matches!(value, $expected);
+            }
+
+            paste! {
+                #[tokio::test]
+                async fn [<$test_name _async>]() {
+                    let parser = $parser;
+                    let reader = std::io::Cursor::new($ini_file_string);
+                    let value = parser.read_value_async(reader, $section, $key).await;
+                    ::assert_matches::assert_matches!(value, $expected);
+                }
+            }
+        };
+    }
+
     use super::*;
 
     #[test]
@@ -341,165 +406,168 @@ mod tests {
         assert_eq!(new_name, "  Name=Ender Wiggins  ");
     }
 
-    const TEST_INI: &str = r#"
-        user="tom"
+    get_value_eq! {
+        get_value,
+        IniParser::default(),
+        r#"
+            first_name = "tom"
+        "#,
+        None,
+        "first_name",
+        Some("tom".to_string())
+    }
+
+    get_value_eq! {
+        get_value_section,
+        IniParser::default(),
+        r#"
+            [user]
+            first_name = "tom"
+        "#,
+        Some("user"),
+        "first_name",
+        Some("tom".to_string())
+    }
+
+    get_value_eq! {
+        get_value_no_section,
+        IniParser::default(),
+        r#"
+            date = "10/29/2024"
+
+            [user]
+            first_name = "tom"
+            date = "shouldn't get this"
+        "#,
+        None,
+        "date",
+        Some("10/29/2024".to_string())
+    }
+
+    get_value_eq! {
+        get_unquoted_string,
+        IniParser::default(),
+        r#"
+            [user]
+            first_name = tom
+        "#,
+        Some("user"),
+        "first_name",
+        Some("tom".to_string())
+    }
+
+    get_value_eq! {
+        get_bool_true,
+        IniParser::default(),
+        r#"
+            [user]
+            first_name = tom
+            is_admin = true
+        "#,
+        Some("user"),
+        "is_admin",
+        Some(true)
+    }
+
+    get_value_eq! {
+        get_bool_quotes,
+        IniParser::default(),
+        r#"
+            [user]
+            first_name = tom
+            is_admin = "true"
+        "#,
+        Some("user"),
+        "is_admin",
+        Some(true)
+    }
+
+    get_value_matches! {
+        get_bool_uppercase,
+        IniParser::default(),
+        r#"
+            [user]
+            first_name = tom
+            is_admin = "TRUE"
+        "#,
+        Some("user"),
+        "is_admin",
+        Ok(Some(true))
+    }
+
+    get_value_eq! {
+        get_bool_false,
+        IniParser::default(),
+        r#"
+            [user]
+            first_name = bill
+            is_admin = false
+        "#,
+        Some("user"),
+        "is_admin",
+        Some(false)
+    }
+    
+    get_value_eq! {
+        get_value_multiline,
+        IniParser::default(),
+        r#"
+            description = "a longer \
+            value \
+            spanning multiple \
+            lines"
+        "#,
+        None,
+        "description",
+        Some("a longer value spanning multiple lines".to_string())
+    }
+
+    /// A test ini file that has duplicate entries including a duplicate section with the same key
+    const DUPLICATE_INI: &str = r#"
         [contact]
-        # quoted string
-        email = "test@example.com"
-        # duplicate entry
-        email = "test2@example.com"
-        description = some longer description that \
-        takes multiple lines \
-        sometimes more than two
+        email = test@example.com
+        email = test2@example.com
 
-        [ database auth ] # whitespace around section names will be removed
-        password=password ; an unquoted string
+        [other]
+        another_key= something
 
-        [ contact ] # duplicated section to show that DuplicateKeyStrategy::UseLast picks this up
-        email = "test3@example.com"
-        "#;
+        [contact]
+        email = test3@example.com
+    "#;
 
-    #[test]
-    fn get_value_no_section() {
-        let parser = IniParser::default();
-
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read_value(reader, None, "user").unwrap();
-        assert_eq!(value, Some("tom".to_string()));
-    }
-
-    #[tokio::test]
-    async fn get_value_no_section_async() {
-        let parser = IniParser::default();
-
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read_value_async(reader, None, "user").await.unwrap();
-        assert_eq!(value, Some("tom".to_string()));
-    }
-
-    #[test]
-    fn get_value_multiline() {
-        let parser = IniParser::default();
-
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser
-            .read_value(reader, Some("contact"), "description")
-            .unwrap();
-        assert_eq!(
-            value,
-            Some(
-                "some longer description that takes multiple lines sometimes more than two"
-                    .to_string()
-            )
-        );
-    }
-
-    #[test]
-    fn get_value_section() {
-        let parser = IniParser::default();
-
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser
-            .read_value(reader, Some("database auth"), "password")
-            .unwrap();
-        assert_eq!(value, Some("password".to_string()));
-    }
-
-    #[tokio::test]
-    async fn get_value_section_async() {
-        let parser = IniParser::default();
-
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser
-            .read_value_async(reader, Some("database auth"), "password")
-            .await
-            .unwrap();
-        assert_eq!(value, Some("password".to_string()));
-    }
-
-    #[test]
-    fn get_quoted_value() {
-        let parser = IniParser::default();
-
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read_value(reader, Some("contact"), "email").unwrap();
-        assert_eq!(value, Some("test3@example.com".to_string()));
-    }
-
-    #[test]
-    fn get_duplicate_value_first() {
-        let parser = IniParser {
+    get_value_eq! {
+        get_duplicate_value_first,
+        IniParser{
             duplicate_keys: DuplicateKeyStrategy::UseFirst,
-            ..Default::default()
-        };
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read_value(reader, Some("contact"), "email").unwrap();
-        assert_eq!(value, Some("test@example.com".to_string()));
+            ..IniParser::default()
+        },
+        DUPLICATE_INI,
+        Some("contact"),
+        "email",
+        Some("test@example.com".to_string())
     }
 
-    #[test]
-    fn get_duplicate_value_last() {
-        let parser = IniParser {
+    get_value_eq! {
+        get_duplicate_value_last,
+        IniParser{
             duplicate_keys: DuplicateKeyStrategy::UseLast,
-            ..Default::default()
-        };
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read_value(reader, Some("contact"), "email").unwrap();
-        assert_eq!(value, Some("test3@example.com".to_string()));
+            ..IniParser::default()
+        },
+        DUPLICATE_INI,
+        Some("contact"),
+        "email",
+        Some("test3@example.com".to_string())
     }
 
-    #[test]
-    fn get_duplicate_value_error() {
-        let parser = IniParser {
+    get_value_matches! {
+        get_duplicate_value_error,
+        IniParser{
             duplicate_keys: DuplicateKeyStrategy::Error,
-            ..Default::default()
-        };
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read_value::<String>(reader, Some("contact"), "email");
-        assert!(value.is_err());
-    }
-
-    #[tokio::test]
-    async fn get_value_async() {
-        let parser = IniParser::default();
-
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser.read_value_async(reader, None, "user").await.unwrap();
-        assert_eq!(value, Some("tom".to_string()));
-
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser
-            .read_value_async(reader, Some("database auth"), "password")
-            .await
-            .unwrap();
-        assert_eq!(value, Some("password".to_string()));
-
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser
-            .read_value_async(reader, Some("contact"), "email")
-            .await
-            .unwrap();
-        assert_eq!(value, Some("test3@example.com".to_string()));
-
-        let parser = IniParser {
-            duplicate_keys: DuplicateKeyStrategy::UseFirst,
-            ..Default::default()
-        };
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser
-            .read_value_async(reader, Some("contact"), "email")
-            .await
-            .unwrap();
-        assert_eq!(value, Some("test@example.com".to_string()));
-
-        let parser = IniParser {
-            duplicate_keys: DuplicateKeyStrategy::Error,
-            ..Default::default()
-        };
-        let reader = std::io::Cursor::new(TEST_INI);
-        let value = parser
-            .read_value_async::<String>(reader, Some("contact"), "email")
-            .await;
-        assert!(value.is_err());
+            ..IniParser::default()
+        },
+        DUPLICATE_INI,
+        Some("contact"),
+        "email",
+        Err::<Option<String>, _>(ParseError::Io(_))
     }
 }

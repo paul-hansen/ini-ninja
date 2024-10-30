@@ -10,6 +10,57 @@ use std::{
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 
+pub trait FromIniStr: Sized {
+    type Err;
+    fn from_ini_str(ini_str: &str) -> Result<Self, Self::Err>;
+}
+
+macro_rules! impl_from_ini_str {
+    ($type:ty) => {
+        impl FromIniStr for $type {
+            type Err = <$type as FromStr>::Err;
+            fn from_ini_str(ini_str: &str) -> Result<Self, Self::Err> {
+                FromStr::from_str(ini_str)
+            }
+        }
+    };
+}
+
+impl FromIniStr for bool {
+    type Err = <bool as FromStr>::Err;
+    fn from_ini_str(ini_str: &str) -> Result<Self, <bool as FromStr>::Err> {
+        let ini_str = ini_str.trim().to_ascii_lowercase();
+        match &ini_str.as_str() {
+            x if ["1", "yes", "on"].contains(x) => return Ok(true),
+            x if ["0", "no", "off"].contains(x) => return Ok(false),
+            _ => {}
+        }
+        <bool as FromStr>::from_str(&ini_str)
+    }
+}
+
+impl FromIniStr for String {
+    type Err = <String as FromStr>::Err;
+    fn from_ini_str(ini_str: &str) -> Result<Self, Self::Err> {
+        FromStr::from_str(trim_whitespace_and_quotes(ini_str))
+    }
+}
+
+impl_from_ini_str!(i8);
+impl_from_ini_str!(i16);
+impl_from_ini_str!(i32);
+impl_from_ini_str!(i64);
+impl_from_ini_str!(i128);
+impl_from_ini_str!(u8);
+impl_from_ini_str!(u16);
+impl_from_ini_str!(u32);
+impl_from_ini_str!(u64);
+impl_from_ini_str!(u128);
+impl_from_ini_str!(f32);
+impl_from_ini_str!(f64);
+impl_from_ini_str!(char);
+impl_from_ini_str!(std::path::PathBuf);
+
 #[derive(Default, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum DuplicateKeyStrategy {
     #[default]
@@ -25,6 +76,7 @@ pub struct IniParser {
     pub trailing_comments: bool,
     pub value_start_delimiters: &'static [char],
     pub line_continuation: bool,
+    /// How should we handle duplicate keys in the ini file?
     pub duplicate_keys: DuplicateKeyStrategy,
 }
 
@@ -63,16 +115,15 @@ impl IniParser {
         source: impl Read,
         section: Option<&str>,
         name: &str,
-    ) -> Result<Option<T>, ParseError<<T as FromStr>::Err>>
+    ) -> Result<Option<T>, ParseError<<T as FromIniStr>::Err>>
     where
-        T: FromStr,
+        T: FromIniStr,
     {
         let value = self.value_unaltered(source, section, name)?;
         let Some(value) = value else {
             return Ok(None);
         };
-        let value = trim_whitespace_and_quotes(&value);
-        let value = value.parse::<T>().map_err(ParseError::Parse)?;
+        let value = FromIniStr::from_ini_str(&value).map_err(ParseError::Parse)?;
         Ok(Some(value))
     }
 
@@ -83,16 +134,15 @@ impl IniParser {
         source: impl AsyncRead,
         section: Option<&str>,
         name: &str,
-    ) -> Result<Option<T>, ParseError<<T as FromStr>::Err>>
+    ) -> Result<Option<T>, ParseError<<T as FromIniStr>::Err>>
     where
-        T: FromStr,
+        T: FromIniStr,
     {
         let value = self.value_unaltered_async(source, section, name).await?;
         let Some(value) = value else {
             return Ok(None);
         };
-        let value = trim_whitespace_and_quotes(&value);
-        let value = value.parse::<T>().map_err(ParseError::Parse)?;
+        let value = FromIniStr::from_ini_str(&value).map_err(ParseError::Parse)?;
         Ok(Some(value))
     }
 
@@ -470,7 +520,7 @@ mod tests {
         Some(true)
     }
 
-    get_value_eq! {
+    get_value_matches! {
         get_bool_quotes,
         IniParser::default(),
         r#"
@@ -480,7 +530,7 @@ mod tests {
         "#,
         Some("user"),
         "is_admin",
-        Some(true)
+        Err::<Option<bool>, _>(ParseError::Parse(_))
     }
 
     get_value_matches! {
@@ -489,11 +539,35 @@ mod tests {
         r#"
             [user]
             first_name = tom
-            is_admin = "TRUE"
+            is_admin = TRUE
         "#,
         Some("user"),
         "is_admin",
         Ok(Some(true))
+    }
+    get_value_matches! {
+        get_bool_num_true,
+        IniParser::default(),
+        r#"
+            [user]
+            first_name = tom
+            is_admin = 1
+        "#,
+        Some("user"),
+        "is_admin",
+        Ok(Some(true))
+    }
+    get_value_matches! {
+        get_bool_num_false,
+        IniParser::default(),
+        r#"
+            [user]
+            first_name = tom
+            is_admin = 0
+        "#,
+        Some("user"),
+        "is_admin",
+        Ok(Some(false))
     }
 
     get_value_eq! {
@@ -508,7 +582,7 @@ mod tests {
         "is_admin",
         Some(false)
     }
-    
+
     get_value_eq! {
         get_value_multiline,
         IniParser::default(),

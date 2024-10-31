@@ -4,8 +4,8 @@
 #![deny(clippy::panic)]
 mod error;
 use std::{
-    io::{self, BufRead, Read, Write},
-    ops::RangeInclusive,
+    io::{self, BufRead, Read, Seek, Write},
+    ops::Range,
     str::FromStr,
 };
 
@@ -65,8 +65,10 @@ impl_from_ini_str!(std::path::PathBuf);
 
 #[derive(Default, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum DuplicateKeyStrategy {
+    /// Seems to be the most widely used.
     #[default]
     UseLast,
+    /// Fastest because as soon as it finds a match it can stop.
     UseFirst,
     Error,
 }
@@ -146,24 +148,24 @@ impl IniParser {
         Ok(Some(value))
     }
 
-    pub fn write_value(
+    /// Get the current byte range where the value is stored in the source ini file, if it exists.
+    fn value_byte_range(
         &self,
-        source: impl Read,
-        mut destination: impl Write,
+        source: &mut impl BufRead,
         section: Option<&str>,
         key: &str,
-        value: &str,
-    ) -> Result<(), Error> {
-        let mut buffer = std::io::BufReader::new(source.take(self.size_limit));
-
+    ) -> Result<(usize, Option<usize>, Option<Range<usize>>), Error> {
         // Are we in the section we are looking for?
         // Starts in the global namespace, so if section is none it starts as true, changing as we
         // parse different sections.
         let mut in_section = section.is_none();
+        let mut last_in_section = None;
         let mut line = String::new();
+        let mut last_value_candidate = None;
+        let mut bytes_processed = 0;
         loop {
             line.clear();
-            let bytes_read = buffer.read_line(&mut line)?;
+            let bytes_read = source.read_line(&mut line)?;
             if bytes_read == 0 {
                 break;
             }
@@ -180,17 +182,94 @@ impl IniParser {
             //         }
             //     }
             // }
+            if in_section {
+                last_in_section = Some(bytes_processed);
+            }
             if let Some(this_section) = try_section_from_line(&line) {
                 if let Some(section) = section {
                     in_section = section == this_section;
+                } else {
+                    in_section = false;
                 }
             } else if in_section {
-                if let Some(value_range) = self.try_value(&line, key) {
-                    // todo!("{line:?}X {value_range:?}");
-                    line.replace_range(value_range, value);
-                };
+                if let Some(line_range) = self.try_value(&line, key) {
+                    let had_previous = last_value_candidate.is_some();
+                    last_value_candidate = Some(
+                        bytes_processed + line_range.start..bytes_processed + line_range.end,
+                    );
+
+                    if last_value_candidate.is_some() {
+                        match self.duplicate_keys {
+                            DuplicateKeyStrategy::UseFirst if had_previous => {
+                                bytes_processed += bytes_read;
+                                return Ok((
+                                    bytes_processed,
+                                    last_in_section,
+                                    last_value_candidate,
+                                ));
+                            }
+                            _ => {}
+                        };
+                    }
+                }
             }
-            destination.write_all(line.as_bytes())?;
+            bytes_processed += bytes_read;
+        }
+        Ok((bytes_processed, last_in_section, last_value_candidate))
+    }
+
+    pub fn write_value<const B: usize>(
+        &self,
+        source: &mut (impl BufRead + Seek),
+        mut destination: impl Write,
+        section: Option<&str>,
+        key: &str,
+        value: &str,
+    ) -> Result<(), Error> {
+        let mut value = value.to_owned();
+        if self.size_limit != u64::MAX {
+            source.seek(io::SeekFrom::End(0))?;
+            let position = source.stream_position()?;
+            if position > self.size_limit {
+                Err(Error::TooLarge {
+                    limit: self.size_limit,
+                    found: position,
+                })?
+            }
+        }
+        source.rewind()?;
+        let (length, last_byte_in_section, value_range) =
+            self.value_byte_range(source, section, key)?;
+        let value_range = value_range.unwrap_or_else(|| {
+            if let Some(position) = last_byte_in_section {
+                value = format!("{key}={value}\n");
+                position..position
+            } else {
+                value = format!("[section]\n{key}={value}\n");
+                length..length
+            }
+        });
+
+        source.rewind()?;
+        let mut buff = [0; B];
+        let mut source_bytes_index = 0;
+        loop {
+            let bytes_read = source.read(&mut buff)?;
+            if bytes_read == 0 {
+                break;
+            }
+            if source_bytes_index + bytes_read > value_range.start {
+                debug_assert!(value_range.start >= source_bytes_index);
+                let write_until = value_range.start - source_bytes_index;
+                destination.write_all(&buff[0..write_until])?;
+                destination.write_all(value.as_bytes())?;
+                if value_range.end < source_bytes_index + bytes_read {
+                    destination.write_all(&buff[value_range.end..bytes_read])?;
+                }
+            } else {
+                destination.write_all(&buff[0..bytes_read])?;
+            };
+            source_bytes_index += bytes_read;
         }
         Ok(())
     }
@@ -326,7 +405,7 @@ impl IniParser {
 
     /// Given a string, check try to parse as a key value and return the range of the string that
     /// contains the value.
-    fn try_value(&self, line: &str, name: &str) -> Option<RangeInclusive<usize>> {
+    fn try_value(&self, line: &str, name: &str) -> Option<Range<usize>> {
         let name = name.trim();
         // Since comments are always at the end of the line, it won't change the positions to
         // remove them.
@@ -370,7 +449,7 @@ impl IniParser {
             {
                 value_end -= 1;
             }
-            Some(line.char_indices().nth(value_start)?.0..=line.char_indices().nth(value_end)?.0)
+            Some(line.char_indices().nth(value_start)?.0..line.char_indices().nth(value_end)?.0 + 1)
         } else {
             // If there isn't a value delimiter, there's no value.
             None
@@ -399,6 +478,7 @@ fn trim_whitespace_and_quotes(text: &str) -> &str {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use ::paste::paste;
+    use indoc::indoc;
     use io::{read_to_string, Seek};
 
     /// Generate async and sync versions of tests that get values from a given ini
@@ -410,7 +490,7 @@ mod tests {
             $ini_file_string:expr,
             $section:expr,
             $key:expr,
-            $expected:expr
+            $expected:expr $(,)?
         } => {
             #[test]
             fn $test_name() {
@@ -442,7 +522,7 @@ mod tests {
             $ini_file_string:expr,
             $section:expr,
             $key:expr,
-            $expected:pat
+            $expected:pat $(,)?
         } => {
             #[test]
             fn $test_name() {
@@ -499,9 +579,9 @@ mod tests {
 
         let value_range = parser.try_value(&name_line, "Name").unwrap();
         let mut new_name = String::new();
-        new_name.push_str(&name_line[..*value_range.start()]);
+        new_name.push_str(&name_line[..value_range.start]);
         new_name.push_str("Ender Wiggins");
-        new_name.push_str(&name_line[*value_range.end() + 1..]);
+        new_name.push_str(&name_line[value_range.end..]);
         assert_eq!(new_name, "  Name=Ender Wiggins  ");
     }
 
@@ -513,7 +593,7 @@ mod tests {
         "#,
         None,
         "first_name",
-        Some("tom".to_string())
+        Some("tom".to_string()),
     }
 
     get_value_eq! {
@@ -525,7 +605,7 @@ mod tests {
         "#,
         Some("user"),
         "first_name",
-        Some("tom".to_string())
+        Some("tom".to_string()),
     }
 
     get_value_eq! {
@@ -540,7 +620,7 @@ mod tests {
         "#,
         None,
         "date",
-        Some("10/29/2024".to_string())
+        Some("10/29/2024".to_string()),
     }
 
     get_value_eq! {
@@ -552,7 +632,7 @@ mod tests {
         "#,
         Some("user"),
         "first_name",
-        Some("tom".to_string())
+        Some("tom".to_string()),
     }
 
     get_value_eq! {
@@ -565,7 +645,7 @@ mod tests {
         "#,
         Some("user"),
         "is_admin",
-        Some(true)
+        Some(true),
     }
 
     get_value_matches! {
@@ -578,7 +658,7 @@ mod tests {
         "#,
         Some("user"),
         "is_admin",
-        Err::<Option<bool>, _>(Error::Parse(_))
+        Err::<Option<bool>, _>(Error::Parse(_)),
     }
 
     get_value_matches! {
@@ -591,7 +671,7 @@ mod tests {
         "#,
         Some("user"),
         "is_admin",
-        Ok(Some(true))
+        Ok(Some(true)),
     }
     get_value_matches! {
         get_bool_num_true,
@@ -603,7 +683,7 @@ mod tests {
         "#,
         Some("user"),
         "is_admin",
-        Ok(Some(true))
+        Ok(Some(true)),
     }
     get_value_matches! {
         get_bool_num_false,
@@ -615,7 +695,7 @@ mod tests {
         "#,
         Some("user"),
         "is_admin",
-        Ok(Some(false))
+        Ok(Some(false)),
     }
 
     get_value_eq! {
@@ -628,7 +708,7 @@ mod tests {
         "#,
         Some("user"),
         "is_admin",
-        Some(false)
+        Some(false),
     }
 
     get_value_eq! {
@@ -642,7 +722,7 @@ mod tests {
         "#,
         None,
         "description",
-        Some("a longer value spanning multiple lines".to_string())
+        Some("a longer value spanning multiple lines".to_string()),
     }
 
     /// A test ini file that has duplicate entries including a duplicate section with the same key
@@ -667,7 +747,7 @@ mod tests {
         DUPLICATE_INI,
         Some("contact"),
         "email",
-        Some("test@example.com".to_string())
+        Some("test@example.com".to_string()),
     }
 
     get_value_eq! {
@@ -679,7 +759,7 @@ mod tests {
         DUPLICATE_INI,
         Some("contact"),
         "email",
-        Some("test3@example.com".to_string())
+        Some("test3@example.com".to_string()),
     }
 
     get_value_matches! {
@@ -691,7 +771,7 @@ mod tests {
         DUPLICATE_INI,
         Some("contact"),
         "email",
-        Err::<Option<String>, _>(Error::DuplicateKey{..})
+        Err::<Option<String>, _>(Error::DuplicateKey{..}),
     }
 
     const ROUNDTRIP_INI_START: &str = r#"
@@ -718,9 +798,10 @@ mod tests {
         let mut destination = tempfile::tempfile().unwrap();
 
         file.rewind().unwrap();
+        let mut buffer = std::io::BufReader::new(file);
         parser
-            .write_value(
-                &file,
+            .write_value::<1024>(
+                &mut buffer,
                 &mut destination,
                 None,
                 "version",
@@ -739,5 +820,76 @@ mod tests {
         let test = "        version=10\n";
         let version = parser.try_value(test, "version").unwrap();
         assert_eq!(&test[version], "10");
+    }
+    #[macro_export]
+    macro_rules! write_value_eq {
+        {
+            $test_name:ident,
+            $parser:expr,
+            $ini_file_string:expr,
+            $section:expr,
+            $key:expr,
+            $value:expr,
+            $expected:expr
+            $(, $description:expr)* $(,)?
+        } => {
+            #[test]
+            fn $test_name() {
+                let parser = $parser;
+                let mut reader = std::io::Cursor::new($ini_file_string);
+                let mut dest = Vec::new();
+                parser.write_value::<1024>(&mut reader, &mut dest, $section, $key, $value).unwrap();
+                let value = String::from_utf8(dest).unwrap();
+                assert_eq!(value, indoc::formatdoc!("{}",$expected), $($description),*);
+            }
+
+            // paste! {
+            //     #[tokio::test]
+            //     async fn [<$test_name _async>]() {
+            //         let parser = $parser;
+            //         let reader = std::io::Cursor::new($ini_file_string);
+            //         let value = parser.write_value(reader, $section, $key, $value).await.unwrap();
+            //         assert_eq!(value, $expected);
+            //     }
+            // }
+        };
+    }
+
+    write_value_eq! {
+        write_value_no_section_replace,
+        IniParser::default(),
+        "name=tom",
+        None,
+        "name",
+        "bill",
+        "name=bill"
+    }
+
+    write_value_eq! {
+        no_section_not_write_to_section,
+        IniParser::default(),
+        indoc!{"
+            [contact]
+            name=tom
+        "},
+        None,
+        "name",
+        "bill",
+        indoc!{"
+            name=bill
+            [contact]
+            name=tom
+        "},
+        "expected this to add name=bill in the global space",
+    }
+
+    write_value_eq! {
+        write_value_no_section_add,
+        IniParser::default(),
+        "[contact]\nname=tom",
+        Some("contact"),
+        "name",
+        "bill",
+        "[contact]\nname=bill",
     }
 }

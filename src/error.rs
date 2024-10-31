@@ -8,6 +8,10 @@ pub enum Error {
         section: Option<String>,
     },
     Parse(Box<dyn std::error::Error>),
+    TooLarge{
+        limit: u64,
+        found: u64,
+    }
 }
 
 impl Error {
@@ -22,6 +26,7 @@ impl std::error::Error for Error {
             Error::ReadIo(source) => Option::Some(source),
             Error::DuplicateKey { .. } => Option::None,
             Error::Parse { .. } => Option::None,
+            Error::TooLarge { .. } => Option::None,
         }
     }
 }
@@ -42,6 +47,7 @@ impl std::fmt::Display for Error {
                 )
             }
             Error::Parse(_) => f.write_str("error while parsing value"),
+            Error::TooLarge{limit, found} => write!(f, "received source with {found} bytes which exceeds the size limit of {limit}"),
         }
     }
 }

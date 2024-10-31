@@ -12,3 +12,4 @@ tokio = { version = "1.41.0", features = ["io-util", "test-util", "macros"] }
 paste = "1.0.15"
 assert_matches = "1.5.0"
 tempfile = "3.13.0"
+indoc = "2.0.5"

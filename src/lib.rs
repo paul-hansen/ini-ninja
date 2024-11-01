@@ -109,6 +109,12 @@ impl Default for IniParser {
     }
 }
 
+struct ValueByteRangeResult {
+    file_size_bytes: usize,
+    last_byte_in_section: Option<usize>,
+    value_range: Option<Range<usize>>,
+}
+
 impl IniParser {
     /// Read a value from a INI file source.
     /// If section is none, it will look in the global space.
@@ -154,7 +160,7 @@ impl IniParser {
         source: &mut impl BufRead,
         section: Option<&str>,
         key: &str,
-    ) -> Result<(usize, Option<usize>, Option<Range<usize>>), Error> {
+    ) -> Result<ValueByteRangeResult, Error> {
         // Are we in the section we are looking for?
         // Starts in the global namespace, so if section is none it starts as true, changing as we
         // parse different sections.
@@ -194,19 +200,18 @@ impl IniParser {
             } else if in_section {
                 if let Some(line_range) = self.try_value(&line, key) {
                     let had_previous = last_value_candidate.is_some();
-                    last_value_candidate = Some(
-                        bytes_processed + line_range.start..bytes_processed + line_range.end,
-                    );
+                    last_value_candidate =
+                        Some(bytes_processed + line_range.start..bytes_processed + line_range.end);
 
                     if last_value_candidate.is_some() {
                         match self.duplicate_keys {
                             DuplicateKeyStrategy::UseFirst if had_previous => {
                                 bytes_processed += bytes_read;
-                                return Ok((
-                                    bytes_processed,
-                                    last_in_section,
-                                    last_value_candidate,
-                                ));
+                                return Ok(ValueByteRangeResult {
+                                    file_size_bytes: bytes_processed,
+                                    last_byte_in_section: last_in_section,
+                                    value_range: last_value_candidate,
+                                });
                             }
                             _ => {}
                         };
@@ -215,7 +220,11 @@ impl IniParser {
             }
             bytes_processed += bytes_read;
         }
-        Ok((bytes_processed, last_in_section, last_value_candidate))
+        Ok(ValueByteRangeResult {
+            file_size_bytes: bytes_processed,
+            last_byte_in_section: last_in_section,
+            value_range: last_value_candidate,
+        })
     }
 
     pub fn write_value<const BUFFER_SIZE: usize>(
@@ -238,15 +247,18 @@ impl IniParser {
             }
         }
         source.rewind()?;
-        let (length, last_byte_in_section, value_range) =
-            self.value_byte_range(source, section, key)?;
+        let ValueByteRangeResult {
+            file_size_bytes,
+            last_byte_in_section,
+            value_range,
+        } = self.value_byte_range(source, section, key)?;
         let value_range = value_range.unwrap_or_else(|| {
             if let Some(position) = last_byte_in_section {
                 value = format!("{key}={value}\n");
                 position..position
             } else {
                 value = format!("[section]\n{key}={value}\n");
-                length..length
+                file_size_bytes..file_size_bytes
             }
         });
 
@@ -477,10 +489,10 @@ fn trim_whitespace_and_quotes(text: &str) -> &str {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
+    use super::*;
     use ::paste::paste;
     use indoc::indoc;
     use io::{read_to_string, Seek};
-    use super::*;
     use std::io::Write;
 
     /// Generate async and sync versions of tests that get values from a given ini

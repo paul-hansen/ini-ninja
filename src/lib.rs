@@ -218,7 +218,7 @@ impl IniParser {
         Ok((bytes_processed, last_in_section, last_value_candidate))
     }
 
-    pub fn write_value<const B: usize>(
+    pub fn write_value<const BUFFER_SIZE: usize>(
         &self,
         source: &mut (impl BufRead + Seek),
         mut destination: impl Write,
@@ -251,23 +251,23 @@ impl IniParser {
         });
 
         source.rewind()?;
-        let mut buff = [0; B];
+        let mut buffer = [0; BUFFER_SIZE];
         let mut source_bytes_index = 0;
         loop {
-            let bytes_read = source.read(&mut buff)?;
+            let bytes_read = source.read(&mut buffer)?;
             if bytes_read == 0 {
                 break;
             }
             if source_bytes_index + bytes_read > value_range.start {
                 debug_assert!(value_range.start >= source_bytes_index);
                 let write_until = value_range.start - source_bytes_index;
-                destination.write_all(&buff[0..write_until])?;
+                destination.write_all(&buffer[0..write_until])?;
                 destination.write_all(value.as_bytes())?;
                 if value_range.end < source_bytes_index + bytes_read {
-                    destination.write_all(&buff[value_range.end..bytes_read])?;
+                    destination.write_all(&buffer[value_range.end..bytes_read])?;
                 }
             } else {
-                destination.write_all(&buff[0..bytes_read])?;
+                destination.write_all(&buffer[0..bytes_read])?;
             };
             source_bytes_index += bytes_read;
         }
@@ -480,6 +480,8 @@ mod tests {
     use ::paste::paste;
     use indoc::indoc;
     use io::{read_to_string, Seek};
+    use super::*;
+    use std::io::Write;
 
     /// Generate async and sync versions of tests that get values from a given ini
     #[macro_export]
@@ -543,8 +545,6 @@ mod tests {
             }
         };
     }
-
-    use super::*;
 
     #[test]
     fn try_section_not() {
@@ -783,10 +783,8 @@ mod tests {
         [section_one]
     "#;
 
-    use std::io::Write;
-
     #[test]
-    fn write_value() {
+    fn read_write_value_file_roundtrip() {
         let mut file = tempfile::tempfile().unwrap();
         write!(file, "{}", ROUNDTRIP_INI_START).unwrap();
 
@@ -866,7 +864,7 @@ mod tests {
     }
 
     write_value_eq! {
-        no_section_not_write_to_section,
+        write_value_no_section_add,
         IniParser::default(),
         indoc!{"
             [contact]
@@ -884,12 +882,35 @@ mod tests {
     }
 
     write_value_eq! {
-        write_value_no_section_add,
+        write_value_section,
         IniParser::default(),
-        "[contact]\nname=tom",
+        indoc!{"
+            [contact]
+            name=tom
+        "},
         Some("contact"),
         "name",
         "bill",
-        "[contact]\nname=bill",
+        indoc!{"
+            [contact]
+            name=bill
+        "},
+    }
+
+    write_value_eq! {
+        write_value_trailing_comment,
+        IniParser::default(),
+        indoc!{"
+            [contact]
+            name=tom # test
+        "},
+        Some("contact"),
+        "name",
+        "bill",
+        indoc!{"
+            [contact]
+            name=bill # test
+        "},
+        "expected it to keep the trailing comment on the value",
     }
 }

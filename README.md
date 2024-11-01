@@ -1,6 +1,4 @@
-Get and set values from INI files while preserving the files comments and formatting.
-
-
+Get and set values from INI files while preserving the file's comments and formatting.
 
 ## License
 

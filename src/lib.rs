@@ -199,22 +199,19 @@ impl IniParser {
                 }
             } else if in_section {
                 if let Some(line_range) = self.try_value(&line, key) {
-                    let had_previous = last_value_candidate.is_some();
                     last_value_candidate =
                         Some(bytes_processed + line_range.start..bytes_processed + line_range.end);
 
-                    if last_value_candidate.is_some() {
-                        match self.duplicate_keys {
-                            DuplicateKeyStrategy::UseFirst if had_previous => {
-                                bytes_processed += bytes_read;
-                                return Ok(ValueByteRangeResult {
-                                    file_size_bytes: bytes_processed,
-                                    last_byte_in_section: last_in_section,
-                                    value_range: last_value_candidate,
-                                });
-                            }
-                            _ => {}
-                        };
+                    // We can return early if UseFirst is set
+                    if last_value_candidate.is_some()
+                        && self.duplicate_keys == DuplicateKeyStrategy::UseFirst
+                    {
+                        bytes_processed += bytes_read;
+                        return Ok(ValueByteRangeResult {
+                            file_size_bytes: bytes_processed,
+                            last_byte_in_section: last_in_section,
+                            value_range: last_value_candidate,
+                        });
                     }
                 }
             }

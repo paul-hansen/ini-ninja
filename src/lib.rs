@@ -10,6 +10,7 @@ use std::{
 };
 
 use error::Error;
+#[cfg(feature = "async")]
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 
 pub trait FromIniStr: Sized {
@@ -137,6 +138,7 @@ impl IniParser {
 
     /// Read a value from an async INI file source.
     /// If section is none, it will look in the global space.
+    #[cfg(feature = "async")]
     pub async fn read_value_async<T>(
         &self,
         source: impl AsyncRead,
@@ -292,6 +294,7 @@ impl IniParser {
         section: Option<&str>,
         key: &str,
     ) -> Result<Option<String>, Error> {
+        // TODO: Ideally this would return Error::TooLarge instead of silently truncating
         let buffer = std::io::BufReader::new(source.take(self.size_limit));
 
         // Are we in the section we are looking for?
@@ -329,12 +332,14 @@ impl IniParser {
     /// stripped though.
     ///
     /// Usually only use this if you are manually parsing something.
+    #[cfg(feature = "async")]
     async fn value_unaltered_async(
         &self,
         source: impl AsyncRead,
         section: Option<&str>,
         key: &str,
     ) -> Result<Option<String>, Error> {
+        // TODO: Ideally this would return Error::TooLarge instead of silently truncating
         let buffer = Box::pin(BufReader::new(source).take(self.size_limit));
 
         // Are we in the section we are looking for?
@@ -486,6 +491,7 @@ fn trim_whitespace_and_quotes(text: &str) -> &str {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+    #[cfg(feature = "async")]
     use ::paste::paste;
     use indoc::indoc;
     use io::{read_to_string, Seek};
@@ -510,6 +516,7 @@ mod tests {
                 assert_eq!(value, $expected);
             }
 
+            #[cfg(feature = "async")]
             paste! {
                 #[tokio::test]
                 async fn [<$test_name _async>]() {
@@ -542,6 +549,7 @@ mod tests {
                 ::assert_matches::assert_matches!(value, $expected);
             }
 
+            #[cfg(feature = "async")]
             paste! {
                 #[tokio::test]
                 async fn [<$test_name _async>]() {

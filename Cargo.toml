@@ -4,8 +4,14 @@ version = "0.1.0"
 edition = "2021"
 resolver = "2"
 
+[features]
+default = ["async"]
+async = ["dep:tokio"]
+
 [dependencies]
-tokio = { version = "1.41.0", default-features = false, features = ["io-util"] }
+tokio = { version = "1.41.0", default-features = false, features = [
+    "io-util",
+], optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.41.0", features = ["io-util", "test-util", "macros"] }

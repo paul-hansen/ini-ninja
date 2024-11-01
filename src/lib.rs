@@ -10,9 +10,10 @@ use std::{
 };
 
 use error::Error;
-use tokio::io::{AsyncBufRead, AsyncSeek, AsyncSeekExt};
 #[cfg(feature = "async")]
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
+use tokio::io::{
+    AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncSeek, AsyncSeekExt, BufReader,
+};
 
 pub trait FromIniStr: Sized {
     type Err: std::error::Error + 'static;
@@ -227,6 +228,7 @@ impl IniParser {
     }
 
     /// Get the current byte range where the value is stored in the source ini file, if it exists.
+    #[cfg(feature = "async")]
     async fn value_byte_range_async(
         &self,
         source: &mut (impl AsyncBufRead + Unpin),
@@ -354,6 +356,7 @@ impl IniParser {
         Ok(())
     }
 
+    #[cfg(feature = "async")]
     pub async fn write_value_async<const BUFFER_SIZE: usize>(
         &self,
         source: &mut (impl AsyncBufRead + AsyncSeek + Unpin),
@@ -976,6 +979,7 @@ mod tests {
                 assert_eq!(value, $expected, $($description),*);
             }
 
+            #[cfg(feature = "async")]
             paste! {
                 #[tokio::test]
                 async fn [<$test_name _async>]() {

@@ -4,7 +4,7 @@ use std::io;
 pub enum Error {
     ReadIo(io::Error),
     DuplicateKey {
-        name: String,
+        key: String,
         section: Option<String>,
     },
     Parse(Box<dyn std::error::Error>),
@@ -35,7 +35,7 @@ impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::core::fmt::Result {
         match self {
             Error::ReadIo(_) => f.write_str("IO error while reading file"),
-            Error::DuplicateKey { name, section } => {
+            Error::DuplicateKey { key: name, section } => {
                 write!(
                     f,
                     "duplicate key {}{} found in ini file",

@@ -122,12 +122,12 @@ impl IniParser {
         &self,
         source: impl Read,
         section: Option<&str>,
-        name: &str,
+        key: &str,
     ) -> Result<Option<T>, Error>
     where
         T: FromIniStr,
     {
-        let value = self.value_unaltered(source, section, name)?;
+        let value = self.value_unaltered(source, section, key)?;
         let Some(value) = value else {
             return Ok(None);
         };
@@ -141,12 +141,12 @@ impl IniParser {
         &self,
         source: impl AsyncRead,
         section: Option<&str>,
-        name: &str,
+        key: &str,
     ) -> Result<Option<T>, Error>
     where
         T: FromIniStr,
     {
-        let value = self.value_unaltered_async(source, section, name).await?;
+        let value = self.value_unaltered_async(source, section, key).await?;
         let Some(value) = value else {
             return Ok(None);
         };
@@ -167,6 +167,7 @@ impl IniParser {
         let mut in_section = section.is_none();
         let mut last_in_section = None;
         let mut line = String::new();
+        let mut next_line = String::new();
         let mut last_value_candidate = None;
         let mut bytes_processed = 0;
         loop {
@@ -175,19 +176,17 @@ impl IniParser {
             if bytes_read == 0 {
                 break;
             }
-            // if line.trim().ends_with('\\') {
-            //     spanning_lines += 1;
-            //     while buffer.read_line(&mut next_line)? != 0 {
-            //         let next_line = next_line.trim_start();
-            //         line.push_str(next_line);
-            //         if let Some(line2) = line.strip_suffix('\\') {
-            //             spanning_lines += 1;
-            //             line = line2.to_string();
-            //         } else {
-            //             break;
-            //         }
-            //     }
-            // }
+            if line.trim().ends_with('\\') {
+                while source.read_line(&mut next_line)? != 0 {
+                    let next_line = next_line.trim_start();
+                    line.push_str(next_line);
+                    if let Some(line2) = line.strip_suffix('\\') {
+                        line = line2.to_string();
+                    } else {
+                        break;
+                    }
+                }
+            }
             if in_section {
                 last_in_section = Some(bytes_processed);
             }
@@ -291,7 +290,7 @@ impl IniParser {
         &self,
         source: impl Read,
         section: Option<&str>,
-        name: &str,
+        key: &str,
     ) -> Result<Option<String>, Error> {
         let buffer = std::io::BufReader::new(source.take(self.size_limit));
 
@@ -319,7 +318,7 @@ impl IniParser {
                     }
                 }
             }
-            if self.process_line(line, section, name, &mut in_section, &mut value)? {
+            if self.process_line(line, section, key, &mut in_section, &mut value)? {
                 return Ok(value);
             }
         }
@@ -334,7 +333,7 @@ impl IniParser {
         &self,
         source: impl AsyncRead,
         section: Option<&str>,
-        name: &str,
+        key: &str,
     ) -> Result<Option<String>, Error> {
         let buffer = Box::pin(BufReader::new(source).take(self.size_limit));
 
@@ -362,7 +361,7 @@ impl IniParser {
                     }
                 }
             }
-            if self.process_line(line, section, name, &mut in_section, &mut value)? {
+            if self.process_line(line, section, key, &mut in_section, &mut value)? {
                 return Ok(value);
             }
         }
@@ -376,7 +375,7 @@ impl IniParser {
         &self,
         line: String,
         section: Option<&str>,
-        name: &str,
+        key: &str,
         in_section: &mut bool,
         value: &mut Option<String>,
     ) -> Result<bool, Error> {
@@ -389,14 +388,14 @@ impl IniParser {
                 *in_section = false;
             }
         } else if *in_section {
-            if let Some(range) = self.try_value(&line, name) {
+            if let Some(range) = self.try_value(&line, key) {
                 let had_previous = value.is_some();
                 *value = Some(line[range].to_string());
                 match self.duplicate_keys {
                     DuplicateKeyStrategy::Error => {
                         if had_previous {
                             return Err(Error::DuplicateKey {
-                                name: name.to_string(),
+                                key: key.to_string(),
                                 section: section.map(|s| s.to_owned()),
                             });
                         }
@@ -414,8 +413,8 @@ impl IniParser {
 
     /// Given a string, check try to parse as a key value and return the range of the string that
     /// contains the value.
-    fn try_value(&self, line: &str, name: &str) -> Option<Range<usize>> {
-        let name = name.trim();
+    fn try_value(&self, line: &str, key: &str) -> Option<Range<usize>> {
+        let name = key.trim();
         // Since comments are always at the end of the line, it won't change the positions to
         // remove them.
         let line = line
@@ -921,5 +920,23 @@ mod tests {
             name=bill # test
         "},
         "expected it to keep the trailing comment on the value",
+    }
+    write_value_eq! {
+        write_value_line_continuation,
+        IniParser::default(),
+        indoc!{"
+            [contact]
+            description=some long\
+            text describing the thing
+            another_key=another value
+        "},
+        Some("contact"),
+        "description",
+        "hello world",
+        indoc!{"
+            [contact]
+            description=hello world
+            another_key=another value
+        "},
     }
 }

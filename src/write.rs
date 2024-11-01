@@ -16,17 +16,6 @@ impl IniParser {
         value: &str,
     ) -> Result<(), Error> {
         let mut value = value.to_owned();
-        if self.size_limit != u64::MAX {
-            source.seek(std::io::SeekFrom::End(0))?;
-            let position = source.stream_position()?;
-            if position > self.size_limit {
-                Err(Error::TooLarge {
-                    limit: self.size_limit,
-                    found: position,
-                })?
-            }
-        }
-        source.rewind()?;
         let ValueByteRangeResult {
             file_size_bytes,
             last_byte_in_section,
@@ -116,6 +105,10 @@ impl IniParser {
     }
 
     /// Get the current byte range where the value is stored in the source ini file, if it exists.
+    ///
+    /// This function is blocking and should be used carefully: it is possible for
+    /// an attacker to continuously send bytes without ever sending a newline
+    /// or EOF. You can use [`take`] to limit the maximum number of bytes read.
     fn value_byte_range(
         &self,
         source: &mut impl BufRead,

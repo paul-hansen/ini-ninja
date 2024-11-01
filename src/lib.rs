@@ -78,15 +78,6 @@ pub struct IniParser {
     pub line_continuation: bool,
     /// How should we handle duplicate keys in the ini file?
     pub duplicate_keys: DuplicateKeyStrategy,
-    /// Prevents attacks where an untrusted source could continuously send data to forever
-    /// lock your system.
-    ///
-    /// The default size limit is 20MiB.
-    /// If you are accepting untrusted input, you may want to reduce this to match what you would
-    /// expect so it fails sooner in the case of an attack.
-    ///
-    /// To remove the limit, just set it to [`u64::MAX`].
-    pub size_limit: u64,
 }
 
 impl Default for IniParser {
@@ -100,7 +91,6 @@ impl Default for IniParser {
             // current line. This allows multiline values.
             line_continuation: true,
             duplicate_keys: DuplicateKeyStrategy::default(),
-            size_limit: 1024 * 1024 * 20,
         }
     }
 }

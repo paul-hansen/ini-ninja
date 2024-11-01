@@ -4,7 +4,7 @@ use std::io::{BufRead, Read};
 
 use crate::{error::Error, FromIniStr, IniParser};
 #[cfg(feature = "async")]
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt};
+use tokio::io::{AsyncBufReadExt, AsyncRead};
 
 impl IniParser {
     /// Read a value from a INI file source.
@@ -57,8 +57,7 @@ impl IniParser {
         section: Option<&str>,
         key: &str,
     ) -> Result<Option<String>, Error> {
-        // TODO: Ideally this would return Error::TooLarge instead of silently truncating
-        let buffer = std::io::BufReader::new(source.take(self.size_limit));
+        let buffer = std::io::BufReader::new(source);
 
         // Are we in the section we are looking for?
         // Starts in the global namespace, so if section is none it starts as true, changing as we
@@ -104,7 +103,7 @@ impl IniParser {
     ) -> Result<Option<String>, Error> {
         // TODO: Ideally this would return Error::TooLarge instead of silently truncating
 
-        let buffer = Box::pin(tokio::io::BufReader::new(source).take(self.size_limit));
+        let buffer = Box::pin(tokio::io::BufReader::new(source));
 
         // Are we in the section we are looking for?
         // Starts in the global namespace, so if section is none it starts as true, changing as we

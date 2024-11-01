@@ -621,7 +621,7 @@ mod tests {
 
     /// Generate async and sync versions of tests that get values from a given ini
     #[macro_export]
-    macro_rules! get_value_eq {
+    macro_rules! read_value_eq {
         {
             $test_name:ident,
             $parser:expr,
@@ -654,7 +654,7 @@ mod tests {
     /// Generate async and sync versions of tests that get values from a given ini and assert that
     /// the result matches a pattern. Useful for partially matching errors.
     #[macro_export]
-    macro_rules! get_value_matches {
+    macro_rules! read_value_matches {
         {
             $test_name:ident,
             $parser:expr,
@@ -723,8 +723,8 @@ mod tests {
         assert_eq!(new_name, "  Name=Ender Wiggins  ");
     }
 
-    get_value_eq! {
-        get_value,
+    read_value_eq! {
+        read_value,
         IniParser::default(),
         r#"
             first_name = "tom"
@@ -734,8 +734,8 @@ mod tests {
         Some("tom".to_string()),
     }
 
-    get_value_eq! {
-        get_value_section,
+    read_value_eq! {
+        read_value_section,
         IniParser::default(),
         r#"
             [user]
@@ -746,8 +746,8 @@ mod tests {
         Some("tom".to_string()),
     }
 
-    get_value_eq! {
-        get_value_no_section,
+    read_value_eq! {
+        read_value_no_section,
         IniParser::default(),
         r#"
             date = "10/29/2024"
@@ -761,8 +761,8 @@ mod tests {
         Some("10/29/2024".to_string()),
     }
 
-    get_value_eq! {
-        get_unquoted_string,
+    read_value_eq! {
+        read_unquoted_string,
         IniParser::default(),
         r#"
             [user]
@@ -773,8 +773,8 @@ mod tests {
         Some("tom".to_string()),
     }
 
-    get_value_eq! {
-        get_bool_true,
+    read_value_eq! {
+        read_bool_true,
         IniParser::default(),
         r#"
             [user]
@@ -786,8 +786,8 @@ mod tests {
         Some(true),
     }
 
-    get_value_matches! {
-        get_bool_quotes,
+    read_value_matches! {
+        read_bool_quotes,
         IniParser::default(),
         r#"
             [user]
@@ -799,8 +799,8 @@ mod tests {
         Err::<Option<bool>, _>(Error::Parse(_)),
     }
 
-    get_value_matches! {
-        get_bool_uppercase,
+    read_value_matches! {
+        read_bool_uppercase,
         IniParser::default(),
         r#"
             [user]
@@ -811,8 +811,8 @@ mod tests {
         "is_admin",
         Ok(Some(true)),
     }
-    get_value_matches! {
-        get_bool_num_true,
+    read_value_matches! {
+        read_bool_num_true,
         IniParser::default(),
         r#"
             [user]
@@ -823,8 +823,8 @@ mod tests {
         "is_admin",
         Ok(Some(true)),
     }
-    get_value_matches! {
-        get_bool_num_false,
+    read_value_matches! {
+        read_bool_num_false,
         IniParser::default(),
         r#"
             [user]
@@ -836,8 +836,8 @@ mod tests {
         Ok(Some(false)),
     }
 
-    get_value_eq! {
-        get_bool_false,
+    read_value_eq! {
+        read_bool_false,
         IniParser::default(),
         r#"
             [user]
@@ -849,8 +849,8 @@ mod tests {
         Some(false),
     }
 
-    get_value_eq! {
-        get_value_multiline,
+    read_value_eq! {
+        read_value_multiline,
         IniParser::default(),
         r#"
             description = "a longer \
@@ -876,8 +876,8 @@ mod tests {
         email = test3@example.com
     "#;
 
-    get_value_eq! {
-        get_duplicate_value_first,
+    read_value_eq! {
+        read_duplicate_value_first,
         IniParser{
             duplicate_keys: DuplicateKeyStrategy::UseFirst,
             ..IniParser::default()
@@ -888,8 +888,8 @@ mod tests {
         Some("test@example.com".to_string()),
     }
 
-    get_value_eq! {
-        get_duplicate_value_last,
+    read_value_eq! {
+        read_duplicate_value_last,
         IniParser{
             duplicate_keys: DuplicateKeyStrategy::UseLast,
             ..IniParser::default()
@@ -900,8 +900,8 @@ mod tests {
         Some("test3@example.com".to_string()),
     }
 
-    get_value_matches! {
-        get_duplicate_value_error,
+    read_value_matches! {
+        read_duplicate_value_error,
         IniParser{
             duplicate_keys: DuplicateKeyStrategy::Error,
             ..IniParser::default()

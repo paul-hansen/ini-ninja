@@ -1,4 +1,55 @@
-#![doc = include_str!("../README.md")]
+//! # INI Ninja 🥷
+//! 
+//! Get and set values from INI files while preserving the file's comments and formatting.
+//! 
+//! ## Features
+//! 
+//! - Custom parsing logic written in pure rust, no slow regex found here.
+//! - Can handle large files with low memory use, never needs to have the whole file in ram at once.
+//! - Async and sync versions of read and write functions.
+//! - Tests, CI, all the good things to make sure the code quality stays consistent in the future.
+//! - No dependencies.
+//! 
+//! ## Examples
+//!
+//! Read a value from a [`File`](std::fs::File)
+//!
+//! ```no_run
+//! # use ini_ninja::IniParser;
+//! # use std::fs::File;
+//! # fn main () -> Result<(), ini_ninja::Error> {
+//! let ini_file = File::open("../examples/ini_files/conan_exiles/DefaultGame.ini")?;
+//!
+//! // The default parser should work with most ini files
+//! let parser = IniParser::default();
+//! let max_players: Option<usize> = parser
+//!    .read_value(ini_file, Some("/Script/Engine.GameSession"), "MaxPlayers")?;
+//!
+//! assert_eq!(max_players, Some(40));
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! Write a value to a [`File`](std::fs::File)
+//!
+//! ```no_run
+//! # use ini_ninja::IniParser;
+//! # use std::fs::File;
+//! # use std::io::BufReader;
+//! # fn main () -> Result<(), ini_ninja::Error> {
+//! let ini_file = File::open("file/path")?;
+//! let mut read_buffer = BufReader::new(ini_file);
+//! // We'll first write the changes to a temporary file.
+//! let temp = tempfile::NamedTempFile::new()?;
+//!
+//! let parser = IniParser::default();
+//! parser.write_value::<1024>(&mut read_buffer, &temp, Some("section"), "key", "Hello World")?;
+//!
+//! // now we tell the OS to replace the original file with our modified version.
+//! std::fs::rename(temp.path(), "file/path");
+//! # Ok(())
+//! # }
+//! ```
 #![deny(clippy::unwrap_used)]
 #![deny(clippy::expect_used)]
 #![deny(clippy::panic)]
@@ -7,6 +58,8 @@ mod read;
 mod write;
 pub use error::Error;
 use std::{ops::Range, str::FromStr};
+#[cfg(doctest)]
+mod readme_tests;
 
 pub trait FromIniStr: Sized {
     type Err: std::error::Error + 'static;
@@ -54,6 +107,8 @@ impl_from_ini_str!(u16);
 impl_from_ini_str!(u32);
 impl_from_ini_str!(u64);
 impl_from_ini_str!(u128);
+impl_from_ini_str!(usize);
+impl_from_ini_str!(isize);
 impl_from_ini_str!(f32);
 impl_from_ini_str!(f64);
 impl_from_ini_str!(char);

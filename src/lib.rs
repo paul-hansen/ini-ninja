@@ -1,15 +1,15 @@
 //! # INI Ninja 🥷
-//! 
+//!
 //! Get and set values from INI files while preserving the file's comments and formatting.
-//! 
+//!
 //! ## Features
-//! 
+//!
 //! - Custom parsing logic written in pure rust, no slow regex found here.
 //! - Can handle large files with low memory use, never needs to have the whole file in ram at once.
 //! - Async and sync versions of read and write functions.
 //! - Tests, CI, all the good things to make sure the code quality stays consistent in the future.
 //! - No dependencies.
-//! 
+//!
 //! ## Examples
 //!
 //! Read a value from a [`File`](std::fs::File)

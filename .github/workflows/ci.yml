@@ -22,6 +22,8 @@ jobs:
     - uses: taiki-e/install-action@v2
       with:
         tool: nextest
+    - name: Format
+      run: cargo fmt --check
     - name: Build
       run: cargo build --verbose
     - name: Run Clippy

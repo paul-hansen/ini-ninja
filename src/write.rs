@@ -344,7 +344,6 @@ impl IniParser {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    #[cfg(feature = "async")]
     use ::paste::paste;
     use indoc::indoc;
 
@@ -375,7 +374,7 @@ mod tests {
                     let parser = $parser;
                     let mut reader = std::io::Cursor::new($ini_file_string);
                     let mut dest = Vec::new();
-                    parser.write_value::<10>(&mut reader, &mut dest, $section, $key, $value).unwrap();
+                    parser.write_value::<1>(&mut reader, &mut dest, $section, $key, $value).unwrap();
                     let value = String::from_utf8(dest).unwrap();
                     assert_eq!(value, $expected, $($description),*);
                 }

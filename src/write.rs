@@ -4,23 +4,36 @@ use crate::{error::Error, IniParser, ValueByteRangeResult};
 use std::io::{BufRead, Seek, Write};
 
 #[cfg(feature = "async")]
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncSeek, AsyncSeekExt};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncSeek, AsyncSeekExt};
 
 impl IniParser {
+    /// Changes the value in the source ini and writes the resulting changed ini file to the
+    /// destination.
+    ///
+    /// BUFFER_SIZE is the size of a buffer used to write the lines
     pub fn write_value<const BUFFER_SIZE: usize>(
         &self,
-        source: &mut (impl BufRead + Seek),
+        source: &mut (impl std::io::Read + Seek),
         mut destination: impl Write,
         section: Option<&str>,
         key: &str,
         value: &str,
     ) -> Result<(), Error> {
+        // Because we might not know if there are other copies of the until we reach the end of
+        // the file, we have to scan the file once to find the correct location of the value.
+        // Once we know that we rewind and write the contents
+        // Technically with DuplicateKeyStrategy::UseFirst, we could just use the first location
+        // encountered and not have to rewind, it would need to be implemented as another method
+        // though to remove the trait bound.
         let mut value = value.to_owned();
         let ValueByteRangeResult {
             file_size_bytes,
             last_byte_in_section,
             value_range,
-        } = self.value_byte_range(source, section, key)?;
+        } = {
+            let mut buffer = std::io::BufReader::new(&mut *source);
+            self.value_byte_range(&mut buffer, section, key)?
+        };
         let value_range = value_range.unwrap_or_else(|| {
             if let Some(position) = last_byte_in_section {
                 value = format!("{key}={value}\n");
@@ -33,24 +46,62 @@ impl IniParser {
 
         source.rewind()?;
         let mut buffer = [0; BUFFER_SIZE];
-        let mut source_bytes_index = 0;
+        let mut buffer_window_start = 0;
+        let mut buffer_window_end = 0;
+        let mut in_value = false;
         loop {
-            let bytes_read = source.read(&mut buffer)?;
+            let bytes_read = source.read(&mut buffer)?.min(BUFFER_SIZE);
+
+            debug_assert!(bytes_read <= BUFFER_SIZE, "{bytes_read}");
             if bytes_read == 0 {
                 break;
             }
-            if source_bytes_index + bytes_read > value_range.start {
-                debug_assert!(value_range.start >= source_bytes_index);
-                let write_until = value_range.start - source_bytes_index;
-                destination.write_all(&buffer[0..write_until])?;
-                destination.write_all(value.as_bytes())?;
-                if value_range.end < source_bytes_index + bytes_read {
-                    destination.write_all(&buffer[value_range.end..bytes_read])?;
+            buffer_window_end += bytes_read;
+            // is the start of the value inside of the buffer's current window?
+            let start_in_window =
+                (buffer_window_start..buffer_window_end).contains(&value_range.start);
+            // is the end of the value inside of the buffer's current window?
+            let end_in_window = (buffer_window_start..buffer_window_end).contains(&value_range.end);
+            if start_in_window {
+                in_value = true;
+            }
+            match (start_in_window, end_in_window, in_value) {
+                // We are not in a value and no value is starting or ending, write all the bytes we
+                // read exactly the same as the source.
+                (false, false, false) => destination.write_all(&buffer[..bytes_read])?,
+                // if the whole buffer window is inside the value we are replacing, we don't need to
+                // write the old value so do nothing
+                (false, false, true) => {}
+                // value is starting in this buffer window
+                (true, end_in_window, _) => {
+                    in_value = true;
+                    let write_until = value_range.start - buffer_window_start;
+                    debug_assert!(
+                        write_until < BUFFER_SIZE,
+                        "buffer_window: [{}..{}], write_until: {}",
+                        buffer_window_start,
+                        buffer_window_end,
+                        write_until
+                    );
+                    destination.write_all(&buffer[0..write_until])?;
+                    destination.write_all(value.as_bytes())?;
+                    if end_in_window {
+                        destination.write_all(
+                            &buffer[value_range.end - buffer_window_start
+                                ..buffer_window_end - buffer_window_start],
+                        )?;
+                    }
                 }
-            } else {
-                destination.write_all(&buffer[0..bytes_read])?;
-            };
-            source_bytes_index += bytes_read;
+                // value is ending but did not start in this buffer window
+                (false, true, _) => {
+                    destination
+                        .write_all(&buffer[value_range.end - buffer_window_start..bytes_read])?;
+                }
+            }
+            if end_in_window {
+                in_value = false;
+            }
+            buffer_window_start = buffer_window_end
         }
         Ok(())
     }
@@ -58,7 +109,7 @@ impl IniParser {
     #[cfg(feature = "async")]
     pub async fn write_value_async<const BUFFER_SIZE: usize>(
         &self,
-        source: &mut (impl AsyncBufRead + AsyncSeek + Unpin),
+        source: &mut (impl AsyncRead + AsyncSeek + Unpin),
         mut destination: impl Write,
         section: Option<&str>,
         key: &str,
@@ -69,7 +120,11 @@ impl IniParser {
             file_size_bytes,
             last_byte_in_section,
             value_range,
-        } = self.value_byte_range_async(source, section, key).await?;
+        } = {
+            let mut buffer = tokio::io::BufReader::new(&mut *source);
+            self.value_byte_range_async(&mut buffer, section, key)
+                .await?
+        };
         let value_range = value_range.unwrap_or_else(|| {
             if let Some(position) = last_byte_in_section {
                 value = format!("{key}={value}\n");
@@ -82,24 +137,61 @@ impl IniParser {
 
         source.rewind().await?;
         let mut buffer = [0; BUFFER_SIZE];
-        let mut source_bytes_index = 0;
+        let mut buffer_window_start = 0;
+        let mut buffer_window_end = 0;
+        let mut in_value = false;
         loop {
             let bytes_read = source.read(&mut buffer).await?;
             if bytes_read == 0 {
                 break;
             }
-            if source_bytes_index + bytes_read > value_range.start {
-                debug_assert!(value_range.start >= source_bytes_index);
-                let write_until = value_range.start - source_bytes_index;
-                destination.write_all(&buffer[0..write_until])?;
-                destination.write_all(value.as_bytes())?;
-                if value_range.end < source_bytes_index + bytes_read {
-                    destination.write_all(&buffer[value_range.end..bytes_read])?;
+            buffer_window_end += bytes_read;
+            // is the start of the value inside of the buffer's current window?
+            let start_in_window =
+                value_range.start >= buffer_window_start && value_range.start < buffer_window_end;
+            // is the end of the value inside of the buffer's current window?
+            let end_in_window =
+                value_range.end >= buffer_window_start && value_range.end < buffer_window_end;
+            if start_in_window {
+                in_value = true;
+            }
+            match (start_in_window, end_in_window, in_value) {
+                // We are not in a value and no value is starting or ending, write all the bytes we
+                // read exactly the same as the source.
+                (false, false, false) => destination.write_all(&buffer[..bytes_read])?,
+                // if the whole buffer window is inside the value we are replacing, we don't need to
+                // write the old value so do nothing
+                (false, false, true) => {}
+                // value is starting in this buffer window
+                (true, end_in_window, _) => {
+                    in_value = true;
+                    let write_until = value_range.start - buffer_window_start;
+                    debug_assert!(
+                        write_until < BUFFER_SIZE,
+                        "buffer_window: [{}..{}], write_until: {}",
+                        buffer_window_start,
+                        buffer_window_end,
+                        write_until
+                    );
+                    destination.write_all(&buffer[0..write_until])?;
+                    destination.write_all(value.as_bytes())?;
+                    if end_in_window {
+                        destination.write_all(
+                            &buffer[value_range.end - buffer_window_start
+                                ..buffer_window_end - buffer_window_start],
+                        )?;
+                    }
                 }
-            } else {
-                destination.write_all(&buffer[0..bytes_read])?;
-            };
-            source_bytes_index += bytes_read;
+                // value is ending but did not start in this buffer window
+                (false, true, _) => {
+                    destination
+                        .write_all(&buffer[value_range.end - buffer_window_start..bytes_read])?;
+                }
+            }
+            if end_in_window {
+                in_value = false;
+            }
+            buffer_window_start = buffer_window_end
         }
         Ok(())
     }
@@ -277,6 +369,17 @@ mod tests {
                 let value = String::from_utf8(dest).unwrap();
                 assert_eq!(value, $expected, $($description),*);
             }
+            paste! {
+                #[test]
+                fn [<$test_name _small_buf>]() {
+                    let parser = $parser;
+                    let mut reader = std::io::Cursor::new($ini_file_string);
+                    let mut dest = Vec::new();
+                    parser.write_value::<10>(&mut reader, &mut dest, $section, $key, $value).unwrap();
+                    let value = String::from_utf8(dest).unwrap();
+                    assert_eq!(value, $expected, $($description),*);
+                }
+            }
 
             #[cfg(feature = "async")]
             paste! {
@@ -286,6 +389,19 @@ mod tests {
                     let mut reader = std::io::Cursor::new($ini_file_string);
                     let mut dest = Vec::new();
                     parser.write_value_async::<1024>(&mut reader, &mut dest, $section, $key, $value).await.unwrap();
+                    let value = String::from_utf8(dest).unwrap();
+                    assert_eq!(value, $expected, $($description),*);
+                }
+            }
+
+            #[cfg(feature = "async")]
+            paste! {
+                #[tokio::test]
+                async fn [<$test_name _async_small_buf>]() {
+                    let parser = $parser;
+                    let mut reader = std::io::Cursor::new($ini_file_string);
+                    let mut dest = Vec::new();
+                    parser.write_value_async::<10>(&mut reader, &mut dest, $section, $key, $value).await.unwrap();
                     let value = String::from_utf8(dest).unwrap();
                     assert_eq!(value, $expected, $($description),*);
                 }
@@ -358,8 +474,9 @@ mod tests {
         IniParser::default(),
         indoc!{"
             [contact]
-            description=some long\
-            text describing the thing
+            description=first line \
+            second line \
+            third line
             another_key=another value
         "},
         Some("contact"),
@@ -370,5 +487,6 @@ mod tests {
             description=hello world
             another_key=another value
         "},
+        "expected all of the lines for the value to be changed to `hello world`",
     }
 }

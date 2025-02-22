@@ -43,7 +43,7 @@
 //! let temp = tempfile::NamedTempFile::new()?;
 //!
 //! let parser = IniParser::default();
-//! parser.write_value::<1024>(&mut read_buffer, &temp, Some("section"), "key", "Hello World")?;
+//! parser.write_value(&mut read_buffer, &temp, Some("section"), "key", "Hello World")?;
 //!
 //! // now we tell the OS to replace the original file with our modified version.
 //! std::fs::rename(temp.path(), "file/path");
@@ -62,7 +62,7 @@ use std::{ops::Range, str::FromStr};
 mod readme_tests;
 
 pub trait FromIniStr: Sized {
-    type Err: std::error::Error + 'static;
+    type Err: std::error::Error + Send + Sync + 'static;
     fn from_ini_str(ini_str: &str) -> Result<Self, Self::Err>;
 }
 

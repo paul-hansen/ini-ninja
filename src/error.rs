@@ -7,11 +7,11 @@ pub enum Error {
         key: String,
         section: Option<String>,
     },
-    Parse(Box<dyn std::error::Error>),
+    Parse(Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl Error {
-    pub(crate) fn new_parse<E: std::error::Error + 'static>(err: E) -> Self {
+    pub(crate) fn new_parse<E: std::error::Error + Send + Sync + 'static>(err: E) -> Self {
         Self::Parse(Box::new(err))
     }
 }
@@ -21,7 +21,7 @@ impl std::error::Error for Error {
         match self {
             Error::ReadIo(source) => Option::Some(source),
             Error::DuplicateKey { .. } => Option::None,
-            Error::Parse { .. } => Option::None,
+            Error::Parse(err) => Some(err.as_ref()),
         }
     }
 }

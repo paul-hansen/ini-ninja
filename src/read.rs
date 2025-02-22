@@ -190,7 +190,6 @@ mod tests {
     use ::paste::paste;
 
     /// Generate async and sync versions of tests that get values from a given ini
-    #[macro_export]
     macro_rules! read_value_eq {
         {
             $test_name:ident,
@@ -223,7 +222,6 @@ mod tests {
 
     /// Generate async and sync versions of tests that get values from a given ini and assert that
     /// the result matches a pattern. Useful for partially matching errors.
-    #[macro_export]
     macro_rules! read_value_matches {
         {
             $test_name:ident,

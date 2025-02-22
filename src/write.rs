@@ -6,12 +6,12 @@ use std::io::{BufRead, Seek, Write};
 #[cfg(feature = "async")]
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncSeek, AsyncSeekExt};
 
+const WRITE_BUFFER_SIZE: usize = 8192;
+
 impl IniParser {
     /// Changes the value in the source ini and writes the resulting changed ini file to the
     /// destination.
-    ///
-    /// BUFFER_SIZE is the size of a buffer used to write the lines
-    pub fn write_value<const BUFFER_SIZE: usize>(
+    pub fn write_value(
         &self,
         source: &mut (impl std::io::Read + Seek),
         mut destination: impl Write,
@@ -19,12 +19,14 @@ impl IniParser {
         key: &str,
         value: &str,
     ) -> Result<(), Error> {
-        // Because we might not know if there are other copies of the until we reach the end of
+        // Since we re
+        source.rewind()?;
+        // Because we might not know if there are other instances until we reach the end of
         // the file, we have to scan the file once to find the correct location of the value.
         // Once we know that we rewind and write the contents
         // Technically with DuplicateKeyStrategy::UseFirst, we could just use the first location
         // encountered and not have to rewind, it would need to be implemented as another method
-        // though to remove the trait bound.
+        // though to remove the Seek trait bound.
         let mut value = value.to_owned();
         let ValueByteRangeResult {
             file_size_bytes,
@@ -39,20 +41,21 @@ impl IniParser {
                 value = format!("{key}={value}\n");
                 position..position
             } else {
-                value = format!("[section]\n{key}={value}\n");
+                let section = section.map(|s| format!("[{s}]\n")).unwrap_or_default();
+                value = format!("{section}{key}={value}\n");
                 file_size_bytes..file_size_bytes
             }
         });
 
         source.rewind()?;
-        let mut buffer = [0; BUFFER_SIZE];
+        let mut buffer = [0; WRITE_BUFFER_SIZE];
         let mut buffer_window_start = 0;
         let mut buffer_window_end = 0;
         let mut in_value = false;
         loop {
-            let bytes_read = source.read(&mut buffer)?.min(BUFFER_SIZE);
+            let bytes_read = source.read(&mut buffer)?.min(WRITE_BUFFER_SIZE);
 
-            debug_assert!(bytes_read <= BUFFER_SIZE, "{bytes_read}");
+            debug_assert!(bytes_read <= WRITE_BUFFER_SIZE, "{bytes_read}");
             if bytes_read == 0 {
                 break;
             }
@@ -77,7 +80,7 @@ impl IniParser {
                     in_value = true;
                     let write_until = value_range.start - buffer_window_start;
                     debug_assert!(
-                        write_until < BUFFER_SIZE,
+                        write_until < WRITE_BUFFER_SIZE,
                         "buffer_window: [{}..{}], write_until: {}",
                         buffer_window_start,
                         buffer_window_end,
@@ -107,7 +110,7 @@ impl IniParser {
     }
 
     #[cfg(feature = "async")]
-    pub async fn write_value_async<const BUFFER_SIZE: usize>(
+    pub async fn write_value_async(
         &self,
         source: &mut (impl AsyncRead + AsyncSeek + Unpin),
         mut destination: impl Write,
@@ -136,7 +139,7 @@ impl IniParser {
         });
 
         source.rewind().await?;
-        let mut buffer = [0; BUFFER_SIZE];
+        let mut buffer = [0; WRITE_BUFFER_SIZE];
         let mut buffer_window_start = 0;
         let mut buffer_window_end = 0;
         let mut in_value = false;
@@ -167,7 +170,7 @@ impl IniParser {
                     in_value = true;
                     let write_until = value_range.start - buffer_window_start;
                     debug_assert!(
-                        write_until < BUFFER_SIZE,
+                        write_until < WRITE_BUFFER_SIZE,
                         "buffer_window: [{}..{}], write_until: {}",
                         buffer_window_start,
                         buffer_window_end,
@@ -347,7 +350,6 @@ mod tests {
     use ::paste::paste;
     use indoc::indoc;
 
-    #[macro_export]
     macro_rules! write_value_eq {
         {
             $test_name:ident,
@@ -364,7 +366,7 @@ mod tests {
                 let parser = $parser;
                 let mut reader = std::io::Cursor::new($ini_file_string);
                 let mut dest = Vec::new();
-                parser.write_value::<1024>(&mut reader, &mut dest, $section, $key, $value).unwrap();
+                parser.write_value(&mut reader, &mut dest, $section, $key, $value).unwrap();
                 let value = String::from_utf8(dest).unwrap();
                 assert_eq!(value, $expected, $($description),*);
             }
@@ -374,7 +376,7 @@ mod tests {
                     let parser = $parser;
                     let mut reader = std::io::Cursor::new($ini_file_string);
                     let mut dest = Vec::new();
-                    parser.write_value::<1>(&mut reader, &mut dest, $section, $key, $value).unwrap();
+                    parser.write_value(&mut reader, &mut dest, $section, $key, $value).unwrap();
                     let value = String::from_utf8(dest).unwrap();
                     assert_eq!(value, $expected, $($description),*);
                 }
@@ -387,20 +389,7 @@ mod tests {
                     let parser = $parser;
                     let mut reader = std::io::Cursor::new($ini_file_string);
                     let mut dest = Vec::new();
-                    parser.write_value_async::<1024>(&mut reader, &mut dest, $section, $key, $value).await.unwrap();
-                    let value = String::from_utf8(dest).unwrap();
-                    assert_eq!(value, $expected, $($description),*);
-                }
-            }
-
-            #[cfg(feature = "async")]
-            paste! {
-                #[tokio::test]
-                async fn [<$test_name _async_small_buf>]() {
-                    let parser = $parser;
-                    let mut reader = std::io::Cursor::new($ini_file_string);
-                    let mut dest = Vec::new();
-                    parser.write_value_async::<10>(&mut reader, &mut dest, $section, $key, $value).await.unwrap();
+                    parser.write_value_async(&mut reader, &mut dest, $section, $key, $value).await.unwrap();
                     let value = String::from_utf8(dest).unwrap();
                     assert_eq!(value, $expected, $($description),*);
                 }

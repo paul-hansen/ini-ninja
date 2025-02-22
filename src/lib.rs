@@ -260,7 +260,7 @@ mod tests {
         file.rewind().unwrap();
         let mut buffer = std::io::BufReader::new(file);
         parser
-            .write_value::<1024>(
+            .write_value(
                 &mut buffer,
                 &mut destination,
                 None,

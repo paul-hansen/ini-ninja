@@ -13,33 +13,53 @@ Get in and out of the file without being noticed 🥷
 
 ## Examples
 
-#### Read value
+#### Read value from file
 
 ```rust
 use ini_ninja::IniParser;
-fn main() {
-    // Could also be a std::fs::File
-    let ini_file = include_bytes!("../examples/ini_files/simple.ini");
+fn main() -> Result<(), Box<dyn std::error::Error>>{
+    let ini_file = std::fs::File::open("./examples/ini_files/simple.ini")?;
 
     // The default parser should work with most ini files
     let parser = IniParser::default();
     let max_players: Option<String> = parser
-        .read_value(ini_file.as_slice(), Some("user"), "first_name")
+        .read_value(ini_file, Some("user"), "first_name")
         .unwrap();
 
     assert_eq!(max_players, Some("Bob".to_string()));
+    Ok(())
+}
+```
+
+#### Read value from String
+
+```rust
+use ini_ninja::IniParser;
+fn main() -> Result<(), Box<dyn std::error::Error>>{
+    let ini_file: String = include_str!("../examples/ini_files/simple.ini").to_string();
+
+    // The default parser should work with most ini files
+    let parser = IniParser::default();
+    let max_players: Option<String> = parser
+        .read_value(ini_file.as_bytes(), Some("user"), "first_name")
+        .unwrap();
+
+    assert_eq!(max_players, Some("Bob".to_string()));
+    Ok(())
 }
 ```
 
 ## Drawbacks
 
-This crate will scan the file's contents every time you read or write a value. If you are reading/writing a majority of the values, this may not be the most efficient for your use case.
-This allows it to ensure the rest of the file's contents are untouched,
-by scanning the file for the start and end location of the value, and using that to replace it with the new value.
+This crate will scan the file's contents every time you read or write a value. If you are reading/writing many values, this may not be the most efficient for your use case.
 
-## Other Crates
+## Comparison with Alternatives
+
+- [ini-roudtrip](https://github.com/VorpalBlade/ini-roundtrip) - Preserves formatting and comments but inserting and writing to a file is left to the user.
 - [configparser](https://github.com/QEDK/configparser-rs) Does not preserve comments [configparser-rs#5](https://github.com/QEDK/configparser-rs/issues/5)
 - [rust-ini](https://github.com/zonyitoo/rust-ini) - Does not preserve comments [rust-ini](https://github.com/zonyitoo/rust-ini/issues/77)
+- [pretty-ini] - Does not preserve formatting
+- [ini_core] - No writing
 
 ## License
 

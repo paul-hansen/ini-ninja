@@ -233,6 +233,9 @@ impl IniParser {
         let mut next_line = String::new();
         let mut last_value_candidate = None;
         let mut bytes_processed = 0;
+        if in_section {
+            last_in_section = Some(bytes_processed);
+        }
         loop {
             line.clear();
             let bytes_read = source.read_line(&mut line)?;
@@ -250,9 +253,6 @@ impl IniParser {
                     }
                 }
             }
-            if in_section {
-                last_in_section = Some(bytes_processed);
-            }
             if let Some(this_section) = try_section_from_line(&line) {
                 if let Some(section) = section {
                     in_section = section == this_section;
@@ -269,6 +269,9 @@ impl IniParser {
                         && self.duplicate_keys == DuplicateKeyStrategy::UseFirst
                     {
                         bytes_processed += bytes_read;
+                        if in_section {
+                            last_in_section = Some(bytes_processed);
+                        }
                         return Ok(ValueByteRangeResult {
                             file_size_bytes: bytes_processed,
                             last_byte_in_section: last_in_section,
@@ -278,6 +281,9 @@ impl IniParser {
                 }
             }
             bytes_processed += bytes_read;
+            if in_section {
+                last_in_section = Some(bytes_processed);
+            }
         }
         Ok(ValueByteRangeResult {
             file_size_bytes: bytes_processed,
@@ -303,6 +309,9 @@ impl IniParser {
         let mut next_line = String::new();
         let mut last_value_candidate = None;
         let mut bytes_processed = 0;
+        if in_section {
+            last_in_section = Some(bytes_processed);
+        }
         loop {
             line.clear();
             let bytes_read = source.read_line(&mut line).await?;
@@ -320,9 +329,6 @@ impl IniParser {
                     }
                 }
             }
-            if in_section {
-                last_in_section = Some(bytes_processed);
-            }
             if let Some(this_section) = try_section_from_line(&line) {
                 if let Some(section) = section {
                     in_section = section == this_section;
@@ -339,6 +345,9 @@ impl IniParser {
                         && self.duplicate_keys == DuplicateKeyStrategy::UseFirst
                     {
                         bytes_processed += bytes_read;
+                        if in_section {
+                            last_in_section = Some(bytes_processed);
+                        }
                         return Ok(ValueByteRangeResult {
                             file_size_bytes: bytes_processed,
                             last_byte_in_section: last_in_section,
@@ -348,6 +357,9 @@ impl IniParser {
                 }
             }
             bytes_processed += bytes_read;
+            if in_section {
+                last_in_section = Some(bytes_processed);
+            }
         }
         Ok(ValueByteRangeResult {
             file_size_bytes: bytes_processed,
@@ -467,6 +479,23 @@ mod tests {
             name=tom
         "},
         description="expected this to add name=bill in the global space, leaving the contact section alone",
+    }
+
+    write_value_eq! {
+        test_name=write_new_value_existing_section,
+        input=indoc!{"
+            [contact]
+            name=bill
+        "},
+        section=Some("contact"),
+        key="email",
+        value="bill@example.com",
+        expected=indoc!{"
+            [contact]
+            name=bill
+            email=bill@example.com
+        "},
+        description="",
     }
 
     write_value_eq! {

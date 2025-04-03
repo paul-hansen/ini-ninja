@@ -55,6 +55,8 @@
 #![deny(clippy::panic)]
 mod error;
 mod read;
+#[cfg(test)]
+mod test_helpers;
 mod write;
 pub use error::Error;
 use std::{ops::Range, str::FromStr};

@@ -19,7 +19,6 @@ impl IniParser {
         key: &str,
         value: &str,
     ) -> Result<(), Error> {
-        // Since we re
         source.rewind()?;
         // Because we might not know if there are other instances until we reach the end of
         // the file, we have to scan the file once to find the correct location of the value.
@@ -36,6 +35,8 @@ impl IniParser {
             let mut buffer = std::io::BufReader::new(&mut *source);
             self.value_byte_range(&mut buffer, section, key)?
         };
+        // If the value wasn't found, we'll be adding it to the end of the section, or the end of
+        // the file. We'll also need to add the key and section.
         let value_range = value_range.unwrap_or_else(|| {
             if let Some(position) = last_byte_in_section {
                 value = format!("{key}={value}\n");
@@ -52,6 +53,7 @@ impl IniParser {
         let mut buffer_window_start = 0;
         let mut buffer_window_end = 0;
         let mut in_value = false;
+        let mut value_written = false;
         loop {
             let bytes_read = source.read(&mut buffer)?.min(WRITE_BUFFER_SIZE);
 
@@ -88,6 +90,7 @@ impl IniParser {
                     );
                     destination.write_all(&buffer[0..write_until])?;
                     destination.write_all(value.as_bytes())?;
+                    value_written = true;
                     if end_in_window {
                         destination.write_all(
                             &buffer[value_range.end - buffer_window_start
@@ -105,6 +108,9 @@ impl IniParser {
                 in_value = false;
             }
             buffer_window_start = buffer_window_end
+        }
+        if !value_written {
+            destination.write_all(value.as_bytes())?;
         }
         Ok(())
     }
@@ -347,6 +353,8 @@ impl IniParser {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+    use crate::assert_eq_preserve_new_lines;
+    #[cfg(feature = "async")]
     use ::paste::paste;
     use indoc::indoc;
 
@@ -368,18 +376,7 @@ mod tests {
                 let mut dest = Vec::new();
                 parser.write_value(&mut reader, &mut dest, $section, $key, $value).unwrap();
                 let value = String::from_utf8(dest).unwrap();
-                assert_eq!(value, $expected, $($description),*);
-            }
-            paste! {
-                #[test]
-                fn [<$test_name _small_buf>]() {
-                    let parser = $parser;
-                    let mut reader = std::io::Cursor::new($ini_file_string);
-                    let mut dest = Vec::new();
-                    parser.write_value(&mut reader, &mut dest, $section, $key, $value).unwrap();
-                    let value = String::from_utf8(dest).unwrap();
-                    assert_eq!(value, $expected, $($description),*);
-                }
+                assert_eq_preserve_new_lines!(value, $expected, $($description),*);
             }
 
             #[cfg(feature = "async")]
@@ -391,7 +388,7 @@ mod tests {
                     let mut dest = Vec::new();
                     parser.write_value_async(&mut reader, &mut dest, $section, $key, $value).await.unwrap();
                     let value = String::from_utf8(dest).unwrap();
-                    assert_eq!(value, $expected, $($description),*);
+                    assert_eq_preserve_new_lines!(value, $expected, $($description),*);
                 }
             }
         };
@@ -405,6 +402,39 @@ mod tests {
         "name",
         "bill",
         "name=bill"
+    }
+
+    write_value_eq! {
+        write_value_section_add_empty,
+        IniParser::default(),
+        "",
+        Some("contact"),
+        "name",
+        "bill",
+        indoc!{"
+            [contact]
+            name=bill
+        "},
+        "expected [contact]name=bill to be added to an empty file",
+    }
+
+    write_value_eq! {
+        write_value_section_add,
+        IniParser::default(),
+        indoc!{"
+            [contact]
+            name=bill
+        "},
+        Some("stats"),
+        "performance",
+        "100",
+        indoc!{"
+            [contact]
+            name=bill
+            [stats]
+            performance=100
+        "},
+        "expected [stats]performance=100 to be added as a new section, leaving the existing section intact.",
     }
 
     write_value_eq! {
@@ -422,7 +452,7 @@ mod tests {
             [contact]
             name=tom
         "},
-        "expected this to add name=bill in the global space",
+        "expected this to add name=bill in the global space, leaving the contact section alone",
     }
 
     write_value_eq! {

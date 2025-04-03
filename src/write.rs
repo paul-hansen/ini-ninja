@@ -360,19 +360,23 @@ mod tests {
 
     macro_rules! write_value_eq {
         {
-            $test_name:ident,
-            $parser:expr,
-            $ini_file_string:expr,
-            $section:expr,
-            $key:expr,
-            $value:expr,
-            $expected:expr
-            $(, $description:expr)* $(,)?
+            test_name = $test_name:ident,
+            input = $input:expr,
+            section = $section:expr,
+            key = $key:expr,
+            value = $value:expr,
+            expected = $expected:expr
+            $(, description = $description:expr)*
+            $(, parser = $parser:expr)* $(,)?
         } => {
             #[test]
             fn $test_name() {
-                let parser = $parser;
-                let mut reader = std::io::Cursor::new($ini_file_string);
+                #[allow(unused_variables)]
+                let parser = IniParser::default();
+                $(
+                    let parser = $parser;
+                )*
+                let mut reader = std::io::Cursor::new($input);
                 let mut dest = Vec::new();
                 parser.write_value(&mut reader, &mut dest, $section, $key, $value).unwrap();
                 let value = String::from_utf8(dest).unwrap();
@@ -383,8 +387,12 @@ mod tests {
             paste! {
                 #[tokio::test]
                 async fn [<$test_name _async>]() {
-                    let parser = $parser;
-                    let mut reader = std::io::Cursor::new($ini_file_string);
+                    #[allow(unused_variables)]
+                    let parser = IniParser::default();
+                    $(
+                        let parser = $parser;
+                    )*
+                    let mut reader = std::io::Cursor::new($input);
                     let mut dest = Vec::new();
                     parser.write_value_async(&mut reader, &mut dest, $section, $key, $value).await.unwrap();
                     let value = String::from_utf8(dest).unwrap();
@@ -395,116 +403,112 @@ mod tests {
     }
 
     write_value_eq! {
-        write_value_no_section_replace,
-        IniParser::default(),
-        "name=tom",
-        None,
-        "name",
-        "bill",
-        "name=bill"
+        test_name=write_value_no_section_replace,
+        input="name=tom",
+        section=None,
+        key="name",
+        value="bill",
+        expected="name=bill",
+        description="test",
+        parser=IniParser::default(),
     }
 
     write_value_eq! {
-        write_value_section_add_empty,
-        IniParser::default(),
-        "",
-        Some("contact"),
-        "name",
-        "bill",
-        indoc!{"
+        test_name=write_value_section_add_empty,
+        input="",
+        section=Some("contact"),
+        key="name",
+        value="bill",
+        expected=indoc!{"
             [contact]
             name=bill
         "},
-        "expected [contact]name=bill to be added to an empty file",
+        description="expected [contact]name=bill to be added to an empty file",
     }
 
     write_value_eq! {
-        write_value_section_add,
-        IniParser::default(),
-        indoc!{"
+        test_name=write_value_section_add,
+        input=indoc!{"
             [contact]
             name=bill
         "},
-        Some("stats"),
-        "performance",
-        "100",
-        indoc!{"
+        section=Some("stats"),
+        key="performance",
+        value="100",
+        expected=indoc!{"
             [contact]
             name=bill
             [stats]
             performance=100
         "},
-        "expected [stats]performance=100 to be added as a new section, leaving the existing section intact.",
+        description="expected [stats]performance=100 to be added as a new section, leaving the existing section intact.",
     }
 
     write_value_eq! {
-        write_value_no_section_add,
-        IniParser::default(),
-        indoc!{"
+        test_name=write_value_no_section_add,
+        input=indoc!{"
             [contact]
             name=tom
         "},
-        None,
-        "name",
-        "bill",
-        indoc!{"
+        section=None,
+        key="name",
+        value="bill",
+        expected=indoc!{"
             name=bill
             [contact]
             name=tom
         "},
-        "expected this to add name=bill in the global space, leaving the contact section alone",
+        description="expected this to add name=bill in the global space, leaving the contact section alone",
     }
 
     write_value_eq! {
-        write_value_section,
-        IniParser::default(),
-        indoc!{"
+        test_name=write_value_section,
+        input=indoc!{"
             [contact]
             name=tom
         "},
-        Some("contact"),
-        "name",
-        "bill",
-        indoc!{"
+        section=Some("contact"),
+        key="name",
+        value="bill",
+        expected=indoc!{"
             [contact]
             name=bill
         "},
+        description="expected name to change from tom to bill",
     }
 
     write_value_eq! {
-        write_value_trailing_comment,
-        IniParser::default(),
-        indoc!{"
+        test_name=write_value_trailing_comment,
+        input=indoc!{"
             [contact]
             name=tom # test
         "},
-        Some("contact"),
-        "name",
-        "bill",
-        indoc!{"
+        section=Some("contact"),
+        key="name",
+        value="bill",
+        expected=indoc!{"
             [contact]
             name=bill # test
         "},
-        "expected it to keep the trailing comment on the value",
+        description="expected name to change while keeping the trailing comment",
     }
     write_value_eq! {
-        write_value_line_continuation,
-        IniParser::default(),
-        indoc!{"
+        test_name=write_value_line_continuation,
+        input=indoc!{"
             [contact]
             description=first line \
             second line \
             third line
             another_key=another value
         "},
-        Some("contact"),
-        "description",
-        "hello world",
-        indoc!{"
+        section=Some("contact"),
+        key="description",
+        value="hello world",
+        expected=indoc!{"
             [contact]
             description=hello world
             another_key=another value
         "},
-        "expected all of the lines for the value to be changed to `hello world`",
+        description="expected all of the lines for the value to be changed to `hello world`",
     }
 }

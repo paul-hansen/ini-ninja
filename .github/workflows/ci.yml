@@ -31,6 +31,6 @@ jobs:
     - name: Run Clippy (Minimal Features)
       run: cargo clippy --all-targets --no-default-features -- -D warnings
     - name: Run Tests
-      run: cargo nextest run
+      run: cargo nextest run --features async
     - name: Run Documentation Tests
-      run: cargo test --doc
+      run: cargo test --doc --features async

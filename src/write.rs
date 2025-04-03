@@ -134,12 +134,15 @@ impl IniParser {
             self.value_byte_range_async(&mut buffer, section, key)
                 .await?
         };
+        // If the value wasn't found, we'll be adding it to the end of the section, or the end of
+        // the file. We'll also need to add the key and section.
         let value_range = value_range.unwrap_or_else(|| {
             if let Some(position) = last_byte_in_section {
                 value = format!("{key}={value}\n");
                 position..position
             } else {
-                value = format!("[section]\n{key}={value}\n");
+                let section = section.map(|s| format!("[{s}]\n")).unwrap_or_default();
+                value = format!("{section}{key}={value}\n");
                 file_size_bytes..file_size_bytes
             }
         });
@@ -149,6 +152,7 @@ impl IniParser {
         let mut buffer_window_start = 0;
         let mut buffer_window_end = 0;
         let mut in_value = false;
+        let mut value_written = false;
         loop {
             let bytes_read = source.read(&mut buffer).await?;
             if bytes_read == 0 {
@@ -184,6 +188,7 @@ impl IniParser {
                     );
                     destination.write_all(&buffer[0..write_until])?;
                     destination.write_all(value.as_bytes())?;
+                    value_written = true;
                     if end_in_window {
                         destination.write_all(
                             &buffer[value_range.end - buffer_window_start
@@ -201,6 +206,9 @@ impl IniParser {
                 in_value = false;
             }
             buffer_window_start = buffer_window_end
+        }
+        if !value_written {
+            destination.write_all(value.as_bytes())?;
         }
         Ok(())
     }

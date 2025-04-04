@@ -506,7 +506,7 @@ mod tests {
             [contact]
             name=bill
         "},
-        section=Some("stats"),
+        section=None,
         key="performance",
         value="100",
         expected=indoc!{"

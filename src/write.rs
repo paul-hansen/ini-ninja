@@ -434,6 +434,18 @@ mod tests {
     }
 
     write_value_eq! {
+        test_name=write_value_no_section_add_empty,
+        input="",
+        section=None,
+        key="name",
+        value="bill",
+        expected=indoc!{"
+            name=bill
+        "},
+        description="expected name=bill to be added to an empty file",
+    }
+
+    write_value_eq! {
         test_name=write_value_section_add_empty,
         input="",
         section=Some("contact"),
@@ -462,6 +474,49 @@ mod tests {
             performance=100
         "},
         description="expected [stats]performance=100 to be added as a new section, leaving the existing section intact.",
+    }
+
+    write_value_eq! {
+        test_name=write_value_section_add_multiple_sections,
+        input=indoc!{"
+            [schedule]
+
+            [contact]
+            name=bill
+        "},
+        section=Some("stats"),
+        key="performance",
+        value="100",
+        expected=indoc!{"
+            [schedule]
+
+            [contact]
+            name=bill
+            [stats]
+            performance=100
+        "},
+        description="expected [stats]performance=100 to be added as a new section, leaving the existing sections intact.",
+    }
+
+    write_value_eq! {
+        test_name=write_value_no_section_add_multiple_sections,
+        input=indoc!{"
+            [schedule]
+
+            [contact]
+            name=bill
+        "},
+        section=Some("stats"),
+        key="performance",
+        value="100",
+        expected=indoc!{"
+            performance=100
+            [schedule]
+
+            [contact]
+            name=bill
+        "},
+        description="expected performance=100 to be added to the global space, leaving the existing sections intact.",
     }
 
     write_value_eq! {
@@ -529,6 +584,7 @@ mod tests {
         "},
         description="expected name to change while keeping the trailing comment",
     }
+
     write_value_eq! {
         test_name=write_value_line_continuation,
         input=indoc!{"

@@ -236,7 +236,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
     use std::io::Write;
-    use std::io::{read_to_string, Seek};
+    use std::io::{Seek, read_to_string};
 
     const ROUNDTRIP_INI_START: &str = r#"
         version=10

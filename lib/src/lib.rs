@@ -216,8 +216,17 @@ impl IniParser {
                 .nth(value_end)
                 .map(|(idx, _)| idx)
                 .unwrap_or(line.len());
+            // Range should include the last character which may be a multi-byte character so
+            // we need to get its size and add it to the end of the range.
+            let last_char_len = line[end..]
+                .chars()
+                .next()
+                .filter(|c| !c.is_whitespace())
+                .map(|c| c.len_utf8())
+                .unwrap_or(0);
+            let end = end + last_char_len;
 
-            Some(start..end + 1)
+            Some(start..end)
         } else {
             // If there isn't a value delimiter, there's no value.
             None

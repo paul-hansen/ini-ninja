@@ -304,4 +304,14 @@ mod tests {
         let version = parser.try_value(test, "version").unwrap();
         assert_eq!(&test[version], "10");
     }
+
+    #[test]
+    fn test_try_value_empty_value() {
+        let parser = IniParser::default();
+        let line = "name=\n";
+        let range = parser.try_value(line, "name").unwrap();
+        let mut s = String::from(line);
+        s.replace_range(range, "a");
+        assert_eq!(s, "name=a\n");
+    }
 }

@@ -1,29 +1,9 @@
-[package]
-name = "ini-ninja"
-version = "0.1.0"
-authors = ["Paul Hansen <mail@paul.rs>"]
-description = "INI file editing with format & comments preserved"
-repository = "https://github.com/paul-hansen/ini-ninja"
-edition = "2021"
-resolver = "2"
-license = "MIT OR Apache-2.0"
-keywords = ["config", "ini", "parser", "settings"]
-categories = ["config", "encoding", "parser-implementations"]
+[workspace]
+resolver = "3"
+members = ["cli", "lib"]
 
-[features]
-async = ["dep:tokio"]
-
-[dependencies]
-tokio = { version = "1.41.0", default-features = false, features = [
-    "io-util",
-], optional = true }
-
-[dev-dependencies]
-tokio = { version = "1.41.0", features = ["io-util", "test-util", "macros"] }
-paste = "1.0.15"
-assert_matches = "1.5.0"
-tempfile = "3.13.0"
-indoc = "2.0.5"
-
-[package.metadata.docs.rs]
-all-features = true
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"

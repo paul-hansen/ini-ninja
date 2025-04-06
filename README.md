@@ -3,22 +3,42 @@
 Get and set values from INI files while preserving the file's comments and formatting.
 Get in and out of the file without being noticed 🥷
 
+
 ## Features
 
 - Custom parsing logic written in rust, no slow regex.
 - Can handle large files with low memory use, never needs to have the whole file in memory at once.
 - Async and sync versions of read and write functions.
 - Tests, CI, all the good things to make sure the code quality stays consistent in the future.
-- No dependencies.
+- No dependencies. (fast to build, no bloat)
 
-## Examples
+## CLI
+
+### Install
+```ignore
+cargo install --git=https://github.com/paul-hansen/ini-ninja/cli
+```
+
+### Usage
+
+```ignore
+ini-ninja -h
+ini-ninja get -h
+ini-ninja set -h
+```
+
+```ignore
+ini-ninja get section key ./some_path
+```
+
+## Library Examples
 
 #### Read value from file
 
 ```rust
 use ini_ninja::IniParser;
 fn main() -> Result<(), Box<dyn std::error::Error>>{
-    let ini_file = std::fs::File::open("./examples/ini_files/simple.ini")?;
+    let ini_file = std::fs::File::open("../examples/ini_files/simple.ini")?;
 
     // The default parser should work with most ini files
     let parser = IniParser::default();
@@ -36,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
 ```rust
 use ini_ninja::IniParser;
 fn main() -> Result<(), Box<dyn std::error::Error>>{
-    let ini_file: String = include_str!("../examples/ini_files/simple.ini").to_string();
+    let ini_file: String = include_str!("examples/ini_files/simple.ini").to_string();
 
     // The default parser should work with most ini files
     let parser = IniParser::default();

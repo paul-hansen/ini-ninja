@@ -1,0 +1,23 @@
+[package]
+name = "ini-ninja-cli"
+version = "0.1.0"
+authors = ["Paul Hansen <mail@paul.rs>"]
+description = "INI file editing with formatting & comments preserved"
+repository = "https://github.com/paul-hansen/ini-ninja"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+keywords = ["config", "ini", "parser", "settings"]
+categories = [
+    "config",
+    "encoding",
+    "parser-implementations",
+    "command-line-utilities",
+]
+
+[[bin]]
+name = "ini-ninja"
+path = "./src/main.rs"
+
+[dependencies]
+ini-ninja = { version = "0.1.0", path = "../lib" }
+tempfile = "3.19.1"

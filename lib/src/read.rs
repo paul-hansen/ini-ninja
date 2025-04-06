@@ -1,8 +1,8 @@
-use crate::try_section_from_line;
 use crate::DuplicateKeyStrategy;
+use crate::try_section_from_line;
 use std::io::{BufRead, Read};
 
-use crate::{error::Error, FromIniStr, IniParser};
+use crate::{FromIniStr, IniParser, error::Error};
 #[cfg(feature = "async")]
 use tokio::io::{AsyncBufReadExt, AsyncRead};
 
@@ -183,7 +183,7 @@ impl IniParser {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
-    use crate::{try_section_from_line, DuplicateKeyStrategy};
+    use crate::{DuplicateKeyStrategy, try_section_from_line};
 
     use super::*;
     #[cfg(feature = "async")]

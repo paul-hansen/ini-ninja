@@ -224,6 +224,9 @@ impl IniParser {
         section: Option<&str>,
         key: &str,
     ) -> Result<ValueByteRangeResult, Error> {
+        // Whitespace around section names is not significant
+        let section = section.map(|s| s.trim());
+
         // Are we in the section we are looking for?
         // Starts in the global namespace, so if section is none it starts as true, changing as we
         // parse different sections.
@@ -300,6 +303,8 @@ impl IniParser {
         section: Option<&str>,
         key: &str,
     ) -> Result<ValueByteRangeResult, Error> {
+        // Whitespace around section names is not significant
+        let section = section.map(|s| s.trim());
         // Are we in the section we are looking for?
         // Starts in the global namespace, so if section is none it starts as true, changing as we
         // parse different sections.
@@ -636,10 +641,10 @@ mod tests {
     }
 
     write_value_eq! {
-        test_name=test_emoji_characters,
+        test_name=write_value_emoji_characters,
         input=indoc!{"
             [display]
-            emoji=🎮🎯 # space emoji
+            emoji=🚀🌎🌟 # space emoji
         "},
         section=Some("display"),
         key="emoji",
@@ -648,6 +653,257 @@ mod tests {
             [display]
             emoji=🎮🎯 # space emoji
         "},
-        description="verify handling of 4-byte emoji characters",
+        description="multi-byte emoji characters as values should be allowed",
+    }
+
+    write_value_eq! {
+        test_name=write_value_special_characters_in_section,
+        input=indoc!{"
+            [special!@$%^&*()]
+            key=value
+        "},
+        section=Some("special!@$%^&*()"),
+        key="key",
+        value="new value",
+        expected=indoc!{"
+            [special!@$%^&*()]
+            key=new value
+        "},
+        description="section names should allow special characters",
+    }
+
+    write_value_eq! {
+        test_name=write_value_comment_delimiter_in_section,
+        input=indoc!{"
+            [special;#1]
+            key=value
+        "},
+        section=Some("special;#1"),
+        key="key",
+        value="new value",
+        expected=indoc!{"
+            [special;#1]
+            key=new value
+        "},
+        description="comment delimiter should work in section names",
+    }
+
+    #[test]
+    fn test_comment_delimiter_not_in_key(){
+        #[allow(unused_variables)]
+        let parser = IniParser::default();
+        let mut reader = std::io::Cursor::new(indoc!{
+            "
+                [section]
+                special#1=value
+            "
+        });
+        let mut dest = Vec::new();
+        parser.write_value(&mut reader, &mut dest,Some("section"),"special","new value").unwrap();
+        let value = String::from_utf8(dest).unwrap();
+        let value = value.replace("\n","\\n\n").replace(" ","·");
+        let should_not_be = (indoc!{
+            "
+                [section]
+                special#1=new value
+            "
+        }).replace("\n","\\n\n").replace(" ","·");
+        assert_ne!(value, should_not_be,"comment delimiter should not work in key names");
+    }
+
+    write_value_eq! {
+        test_name=write_value_special_characters_in_key,
+        input=indoc!{"
+            [section]
+            special!@$%^&*()=value
+        "},
+        section=Some("section"),
+        key="special!@$%^&*()",
+        value="new value",
+        expected=indoc!{"
+            [section]
+            special!@$%^&*()=new value
+        "},
+        description="key names should allow special characters that aren't comment delimiters",
+    }
+
+    write_value_eq! {
+        test_name=write_value_special_characters_in_value,
+        input=indoc!{"
+            [section]
+            key=value!@$%^&*()
+        "},
+        section=Some("section"),
+        key="key",
+        value="new!@$%^&*()",
+        expected=indoc!{"
+            [section]
+            key=new!@$%^&*()
+        "},
+        description="values should allow special characters that aren't comment delimiters",
+    }
+
+    write_value_eq! {
+        test_name=write_value_unicode_characters,
+        input=indoc!{"
+            [unicode]
+            key=áéíóúñ
+        "},
+        section=Some("unicode"),
+        key="key",
+        value="αβγδεζηθ",
+        expected=indoc!{"
+            [unicode]
+            key=αβγδεζηθ
+        "},
+        description="values should allow unicode characters",
+    }
+
+    write_value_eq! {
+        test_name=write_value_very_long_value,
+        input=indoc!{"
+            [section]
+            key=short value
+        "},
+        section=Some("section"),
+        key="key",
+        value="This is a very long value that contains many characters and should be properly handled by the parser. It includes multiple sentences and various punctuation marks. The value is intentionally made long to test the parser's ability to handle large values without issues.",
+        expected=indoc!{"
+            [section]
+            key=This is a very long value that contains many characters and should be properly handled by the parser. It includes multiple sentences and various punctuation marks. The value is intentionally made long to test the parser's ability to handle large values without issues.
+        "},
+        description="values should allow very long values",
+    }
+
+    write_value_eq! {
+        test_name=write_value_duplicate_keys_first,
+        input=indoc!{"
+            [section]
+            key=first value
+            other=other value
+            key=second value
+        "},
+        section=Some("section"),
+        key="key",
+        value="new value",
+        expected=indoc!{"
+            [section]
+            key=new value
+            other=other value
+            key=second value
+        "},
+        description="first key should be updated when using DuplicateKeyStrategy::UseFirst, other keys should be left alone",
+        parser=IniParser{duplicate_keys: DuplicateKeyStrategy::UseFirst,..Default::default()},
+    }
+
+    write_value_eq! {
+        test_name=write_value_duplicate_sections,
+        input=indoc!{"
+            [section]
+            key=first value
+            [other]
+            key=other value
+            [section]
+            key=second value
+        "},
+        section=Some("section"),
+        key="key",
+        value="new value",
+        expected=indoc!{"
+            [section]
+            key=new value
+            [other]
+            key=other value
+            [section]
+            key=second value
+        "},
+        description="first section should be updated when using DuplicateKeyStrategy::UseFirst, other sections should be left alone",
+        parser=IniParser{duplicate_keys: DuplicateKeyStrategy::UseFirst,..Default::default()},
+    }
+
+    write_value_eq! {
+        test_name=write_value_nested_sections,
+        input=indoc!{"
+            [parent]
+            key=parent value
+            [parent.child]
+            key=child value
+        "},
+        section=Some("parent.child"),
+        key="key",
+        value="new child value",
+        expected=indoc!{"
+            [parent]
+            key=parent value
+            [parent.child]
+            key=new child value
+        "},
+        description="nested sections should work the same as other sections and not affect the \"parent\" section",
+    }
+
+    write_value_eq! {
+        test_name=write_value_whitespace_in_section,
+        input=indoc!{"
+            [ section with spaces ]
+            key=value
+        "},
+        section=Some(" section with spaces "),
+        key="key",
+        value="new value",
+        expected=indoc!{"
+            [ section with spaces ]
+            key=new value
+        "},
+        description="whitespace around section names should not be significant",
+    }
+
+    write_value_eq! {
+        test_name=write_value_whitespace_in_key_value,
+        input=indoc!{"
+            [section]
+            key with spaces = value
+        "},
+        section=Some("section"),
+        key="key with spaces ",
+        value="new value",
+        expected=indoc!{"
+            [section]
+            key with spaces = new value
+        "},
+        description="whitespace around keys and values should be preserved",
+    }
+
+    write_value_eq! {
+        test_name=write_value_quoted_values,
+        input=indoc!{"
+            [section]
+            key=\"quoted value\"
+        "},
+        section=Some("section"),
+        key="key",
+        value="\"new quoted value\"",
+        expected=indoc!{"
+            [section]
+            key=\"new quoted value\"
+        "},
+        description="quoted values should be preserved when writing a value",
+    }
+
+    write_value_eq! {
+        test_name=write_value_multiple_comments,
+        input=indoc!{"
+            # Global comment
+            [section] # Section comment
+            key=value # Key comment
+        "},
+        section=Some("section"),
+        key="key",
+        value="new value",
+        expected=indoc!{"
+            # Global comment
+            [section] # Section comment
+            key=new value # Key comment
+        "},
+        description="multiple comments should be preserved when writing a value",
     }
 }

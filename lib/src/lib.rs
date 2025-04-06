@@ -205,7 +205,19 @@ impl IniParser {
             {
                 value_end -= 1;
             }
-            Some(line.char_indices().nth(value_start)?.0..line.char_indices().nth(value_end)?.0 + 1)
+
+            let start = line
+                .char_indices()
+                .nth(value_start)
+                .map(|(idx, _)| idx)
+                .unwrap_or(line.len());
+            let end = line
+                .char_indices()
+                .nth(value_end)
+                .map(|(idx, _)| idx)
+                .unwrap_or(line.len());
+
+            Some(start..end + 1)
         } else {
             // If there isn't a value delimiter, there's no value.
             None

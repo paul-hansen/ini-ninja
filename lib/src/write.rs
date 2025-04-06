@@ -400,7 +400,9 @@ mod tests {
                 let mut dest = Vec::new();
                 parser.write_value(&mut reader, &mut dest, $section, $key, $value).unwrap();
                 let value = String::from_utf8(dest).unwrap();
-                assert_eq_preserve_new_lines!(value, $expected, $($description),*);
+                let value = value.replace("\n", "\\n\n").replace(" ", "·");
+                let expected = $expected.replace("\n", "\\n\n").replace(" ", "·");
+                assert_eq_preserve_new_lines!(value, expected, $($description),*);
             }
 
             #[cfg(feature = "async")]
@@ -603,5 +605,49 @@ mod tests {
             another_key=another value
         "},
         description="expected all of the lines for the value to be changed to `hello world`",
+    }
+
+    write_value_eq! {
+        test_name=write_empty_value_existing_empty,
+        input=indoc!{"
+            name=
+        "},
+        section=None,
+        key="name",
+        value="",
+        expected=indoc!{"
+            name=
+        "},
+        description="expected writing an empty value to an empty value to reuse the existing key",
+    }
+
+    write_value_eq! {
+        test_name=write_value_existing_empty,
+        input=indoc!{"
+            name=
+        "},
+        section=None,
+        key="name",
+        value="bill",
+        expected=indoc!{"
+            name=bill
+        "},
+        description="expected writing a value to an empty value to reuse the existing key",
+    }
+
+    write_value_eq! {
+        test_name=test_emoji_characters,
+        input=indoc!{"
+            [display]
+            emoji=🎮🎯 # space emoji
+        "},
+        section=Some("display"),
+        key="emoji",
+        value="🎮🎯",
+        expected=indoc!{"
+            [display]
+            emoji=🎮🎯 # space emoji
+        "},
+        description="verify handling of 4-byte emoji characters",
     }
 }

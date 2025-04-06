@@ -690,26 +690,39 @@ mod tests {
     }
 
     #[test]
-    fn test_comment_delimiter_not_in_key(){
+    fn test_comment_delimiter_not_in_key() {
         #[allow(unused_variables)]
         let parser = IniParser::default();
-        let mut reader = std::io::Cursor::new(indoc!{
+        let mut reader = std::io::Cursor::new(indoc! {
             "
                 [section]
                 special#1=value
             "
         });
         let mut dest = Vec::new();
-        parser.write_value(&mut reader, &mut dest,Some("section"),"special","new value").unwrap();
+        parser
+            .write_value(
+                &mut reader,
+                &mut dest,
+                Some("section"),
+                "special",
+                "new value",
+            )
+            .unwrap();
         let value = String::from_utf8(dest).unwrap();
-        let value = value.replace("\n","\\n\n").replace(" ","·");
-        let should_not_be = (indoc!{
+        let value = value.replace("\n", "\\n\n").replace(" ", "·");
+        let should_not_be = (indoc! {
             "
                 [section]
                 special#1=new value
             "
-        }).replace("\n","\\n\n").replace(" ","·");
-        assert_ne!(value, should_not_be,"comment delimiter should not work in key names");
+        })
+        .replace("\n", "\\n\n")
+        .replace(" ", "·");
+        assert_ne!(
+            value, should_not_be,
+            "comment delimiter should not work in key names"
+        );
     }
 
     write_value_eq! {

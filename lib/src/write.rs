@@ -272,7 +272,7 @@ impl IniParser {
                         && self.duplicate_keys == DuplicateKeyStrategy::UseFirst
                     {
                         bytes_processed += bytes_read;
-                        if in_section {
+                        if in_section && !line.trim().is_empty() {
                             last_in_section = Some(bytes_processed);
                         }
                         return Ok(ValueByteRangeResult {
@@ -284,7 +284,8 @@ impl IniParser {
                 }
             }
             bytes_processed += bytes_read;
-            if in_section {
+
+            if in_section && !line.trim().is_empty() {
                 last_in_section = Some(bytes_processed);
             }
         }
@@ -350,7 +351,7 @@ impl IniParser {
                         && self.duplicate_keys == DuplicateKeyStrategy::UseFirst
                     {
                         bytes_processed += bytes_read;
-                        if in_section {
+                        if in_section && !line.trim().is_empty() {
                             last_in_section = Some(bytes_processed);
                         }
                         return Ok(ValueByteRangeResult {
@@ -362,7 +363,7 @@ impl IniParser {
                 }
             }
             bytes_processed += bytes_read;
-            if in_section {
+            if in_section && !line.trim().is_empty() {
                 last_in_section = Some(bytes_processed);
             }
         }
@@ -905,5 +906,85 @@ mod tests {
             key=new value # Key comment
         "},
         description="multiple comments should be preserved when writing a value",
+    }
+    write_value_eq! {
+        test_name=add_key_to_section_trailing_empty_lines,
+        input=indoc!{"
+            [section]
+            key=value
+
+            [section2]
+            key=value2
+        "},
+        section=Some("section"),
+        key="key2",
+        value="new value",
+        expected=indoc!{"
+            [section]
+            key=value
+            key2=new value
+
+            [section2]
+            key=value2
+        "},
+        description="adding a key to a section should insert it before any trailing empty lines",
+    }
+
+    write_value_eq! {
+        test_name=add_key_to_global_trailing_empty_lines,
+        input=indoc!{"
+            # Global comment
+
+
+            [section]
+            key=value
+
+            [section2]
+            key=value2
+        "},
+        section=None,
+        key="key2",
+        value="new value",
+        expected=indoc!{"
+            # Global comment
+            key2=new value
+
+
+            [section]
+            key=value
+
+            [section2]
+            key=value2
+        "},
+        description="adding a key to the global section should insert it before any trailing empty lines",
+    }
+
+    write_value_eq! {
+        test_name=add_key_to_last_section_trailing_empty_lines,
+        input=indoc!{"
+            [section]
+            key=value
+
+            [section2]
+            key=value2
+
+
+
+        "},
+        section=Some("section2"),
+        key="key2",
+        value="new value",
+        expected=indoc!{"
+            [section]
+            key=value
+
+            [section2]
+            key=value2
+            key2=new value
+
+
+
+        "},
+        description="adding a key to the last section should insert it before any trailing empty lines",
     }
 }

@@ -11,7 +11,7 @@ Get in and out of the file without being noticed 🥷
 - Can handle large files with low memory use, never needs to have the whole file in memory at once.
 - Async and sync versions of read and write functions.
 - Tests, CI, all the good things to make sure the code quality stays consistent in the future.
-- No dependencies. (fast to build, no bloat, CLI app is tiny)
+- Library has no dependencies. Fast to build, no bloat, CLI app is tiny.
 
 
 ## CLI

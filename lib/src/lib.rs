@@ -193,19 +193,29 @@ impl IniParser {
                 value_start += 1;
             }
 
-            // Determine the end index of the value
-            let mut value_end = line.chars().count() - 1;
+            // Start byte position
+            let start = line
+                .char_indices()
+                .nth(value_start)
+                .map(|(idx, _)| idx)
+                .unwrap_or_else(|| {
+                    // If we couldn't get the start position (reached end of string),
+                    // use the position right after the delimiter
+                    line.char_indices()
+                        .nth(delimiter_index + 1)
+                        .map(|(idx, _)| idx)
+                        .unwrap_or(line.len())
+                });
 
-            // Find the last non-whitespace character
-            while value_end > value_start
-                && line
-                    .chars()
-                    .nth(value_end)
-                    .is_some_and(|c| c.is_whitespace())
-            {
-                value_end -= 1;
-            }
-            Some(line.char_indices().nth(value_start)?.0..line.char_indices().nth(value_end)?.0 + 1)
+            // Find the last non-whitespace character for the end position
+            let end = line[start..]
+                .char_indices()
+                .rev()
+                .find(|(_, c)| !c.is_whitespace())
+                .map(|(idx, c)| start + idx + c.len_utf8())
+                .unwrap_or(start);
+
+            Some(start..end)
         } else {
             // If there isn't a value delimiter, there's no value.
             None
@@ -282,5 +292,35 @@ mod tests {
         let test = "        version=10\n";
         let version = parser.try_value(test, "version").unwrap();
         assert_eq!(&test[version], "10");
+    }
+
+    #[test]
+    fn test_try_value_empty_value() {
+        let parser = IniParser::default();
+        let line = "name=\n";
+        let range = parser.try_value(line, "name").unwrap();
+        let mut s = String::from(line);
+        s.replace_range(range, "a");
+        assert_eq!(s, "name=a\n");
+    }
+
+    #[test]
+    fn test_try_value_range() {
+        let parser = IniParser::default();
+        let line = "name=bob\n";
+        let range = parser.try_value(line, "name").unwrap();
+        let mut s = String::from(line);
+        s.replace_range(range, "bill");
+        assert_eq!(s, "name=bill\n");
+    }
+
+    #[test]
+    fn test_try_value_range_no_newline() {
+        let parser = IniParser::default();
+        let line = "name=bob";
+        let range = parser.try_value(line, "name").unwrap();
+        let mut s = String::from(line);
+        s.replace_range(range, "bill");
+        assert_eq!(s, "name=bill");
     }
 }

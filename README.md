@@ -6,30 +6,33 @@ Get in and out of the file without being noticed 🥷
 
 ## Features
 
+- CLI and Rust crate.
 - Custom parsing logic written in rust, no slow regex.
 - Can handle large files with low memory use, never needs to have the whole file in memory at once.
 - Async and sync versions of read and write functions.
 - Tests, CI, all the good things to make sure the code quality stays consistent in the future.
-- No dependencies. (fast to build, no bloat)
+- No dependencies. (fast to build, no bloat, CLI app is tiny)
+
 
 ## CLI
 
 ### Install
-```ignore
+```text,ignore
 cargo install --git=https://github.com/paul-hansen/ini-ninja/cli
 ```
 
 ### Usage
 
-```ignore
+```text,ignore
 ini-ninja -h
 ini-ninja get -h
 ini-ninja set -h
 ```
 
-```ignore
+```text,ignore
 ini-ninja get section key ./some_path
 ```
+
 
 ## Library Examples
 
@@ -73,13 +76,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
 
 This crate will scan the file's contents every time you read or write a value. If you are reading/writing many values, this may not be the most efficient for your use case.
 
-## Comparison with Alternatives
+## Comparison with other Rust crates
 
 - [ini-roudtrip](https://github.com/VorpalBlade/ini-roundtrip) - Preserves formatting and comments but inserting and writing to a file is left to the user.
 - [configparser](https://github.com/QEDK/configparser-rs) Does not preserve comments [configparser-rs#5](https://github.com/QEDK/configparser-rs/issues/5)
 - [rust-ini](https://github.com/zonyitoo/rust-ini) - Does not preserve comments [rust-ini](https://github.com/zonyitoo/rust-ini/issues/77)
-- [pretty-ini] - Does not preserve formatting
-- [ini_core] - No writing
+- [pretty_ini](https://github.com/eVisualUser/pretty-ini) - Does not preserve formatting
+- [ini_core](https://github.com/CasualX/ini_core) - No writing
 
 ## License
 

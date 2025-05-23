@@ -6,7 +6,7 @@ use crate::{FromIniStr, IniParser, error::Error};
 #[cfg(feature = "async")]
 use tokio::io::{AsyncBufReadExt, AsyncRead};
 
-impl IniParser {
+impl IniParser<'_> {
     /// Read a value from a INI file source.
     /// If section is none, it will look in the global space.
     pub fn read_value<T>(

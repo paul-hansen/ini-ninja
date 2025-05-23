@@ -128,14 +128,14 @@ pub enum DuplicateKeyStrategy {
 
 /// Parses and writes values to INI files with the provided settings.
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub struct IniParser {
+pub struct IniParser<'a> {
     /// Characters that indicate the start of a comment.
-    pub comment_delimiters: &'static [char],
+    pub comment_delimiters: &'a [char],
     /// Are comments supported after a key=value on the same line?
     pub trailing_comments: bool,
     /// Character that will be used to split the key and value.
     /// It's very uncommon that this isn't `=`.
-    pub value_start_delimiters: &'static [char],
+    pub value_start_delimiters: &'a [char],
     /// If true, lines ending with `\` will consider the next line part of the
     /// current line. This allows multiline values.
     pub line_continuation: bool,
@@ -143,7 +143,7 @@ pub struct IniParser {
     pub duplicate_keys: DuplicateKeyStrategy,
 }
 
-impl Default for IniParser {
+impl Default for IniParser<'_> {
     /// The defaults are chosen to be compatible with the widest range of ini formats.
     fn default() -> Self {
         Self {
@@ -162,7 +162,7 @@ struct ValueByteRangeResult {
     value_range: Option<Range<usize>>,
 }
 
-impl IniParser {
+impl IniParser<'_> {
     /// Given a string, check try to parse as a key value and return the range of the string that
     /// contains the value.
     fn try_value(&self, line: &str, key: &str) -> Option<Range<usize>> {

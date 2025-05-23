@@ -126,12 +126,18 @@ pub enum DuplicateKeyStrategy {
     Error,
 }
 
+/// Parses and writes values to INI files with the provided settings.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct IniParser {
-    /// These characters indicate the start of a comment.
+    /// Characters that indicate the start of a comment.
     pub comment_delimiters: &'static [char],
+    /// Are comments supported after a key=value on the same line?
     pub trailing_comments: bool,
+    /// Character that will be used to split the key and value.
+    /// It's very uncommon that this isn't `=`.
     pub value_start_delimiters: &'static [char],
+    /// If true, lines ending with `\` will consider the next line part of the
+    /// current line. This allows multiline values.
     pub line_continuation: bool,
     /// How should we handle duplicate keys in the ini file?
     pub duplicate_keys: DuplicateKeyStrategy,
@@ -144,8 +150,6 @@ impl Default for IniParser {
             comment_delimiters: &['#', ';'],
             trailing_comments: true,
             value_start_delimiters: &['='],
-            // If true, any lines that end with `\` will consider the next line part of the
-            // current line. This allows multiline values.
             line_continuation: true,
             duplicate_keys: DuplicateKeyStrategy::default(),
         }

@@ -8,7 +8,7 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncSee
 
 const WRITE_BUFFER_SIZE: usize = 8192;
 
-impl IniParser {
+impl IniParser<'_> {
     /// Changes the value in the source ini and writes the resulting changed ini file to the
     /// destination.
     pub fn write_value(

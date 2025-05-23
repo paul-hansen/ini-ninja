@@ -241,8 +241,7 @@ fn try_section_from_line(line: &str) -> Option<&str> {
 fn trim_whitespace_and_quotes(text: &str) -> &str {
     let text = text.trim();
     let text = text.strip_prefix('"').unwrap_or(text);
-    let text = text.strip_suffix('"').unwrap_or(text);
-    text
+    text.strip_suffix('"').unwrap_or(text)
 }
 
 #[cfg(test)]

@@ -262,25 +262,23 @@ impl IniParser<'_> {
                 } else {
                     in_section = false;
                 }
-            } else if in_section {
-                if let Some(line_range) = self.try_value(&line, key) {
-                    last_value_candidate =
-                        Some(bytes_processed + line_range.start..bytes_processed + line_range.end);
+            } else if in_section && let Some(line_range) = self.try_value(&line, key) {
+                last_value_candidate =
+                    Some(bytes_processed + line_range.start..bytes_processed + line_range.end);
 
-                    // We can return early if UseFirst is set
-                    if last_value_candidate.is_some()
-                        && self.duplicate_keys == DuplicateKeyStrategy::UseFirst
-                    {
-                        bytes_processed += bytes_read;
-                        if in_section && !line.trim().is_empty() {
-                            last_in_section = Some(bytes_processed);
-                        }
-                        return Ok(ValueByteRangeResult {
-                            file_size_bytes: bytes_processed,
-                            last_byte_in_section: last_in_section,
-                            value_range: last_value_candidate,
-                        });
+                // We can return early if UseFirst is set
+                if last_value_candidate.is_some()
+                    && self.duplicate_keys == DuplicateKeyStrategy::UseFirst
+                {
+                    bytes_processed += bytes_read;
+                    if in_section && !line.trim().is_empty() {
+                        last_in_section = Some(bytes_processed);
                     }
+                    return Ok(ValueByteRangeResult {
+                        file_size_bytes: bytes_processed,
+                        last_byte_in_section: last_in_section,
+                        value_range: last_value_candidate,
+                    });
                 }
             }
             bytes_processed += bytes_read;
@@ -341,25 +339,23 @@ impl IniParser<'_> {
                 } else {
                     in_section = false;
                 }
-            } else if in_section {
-                if let Some(line_range) = self.try_value(&line, key) {
-                    last_value_candidate =
-                        Some(bytes_processed + line_range.start..bytes_processed + line_range.end);
+            } else if in_section && let Some(line_range) = self.try_value(&line, key) {
+                last_value_candidate =
+                    Some(bytes_processed + line_range.start..bytes_processed + line_range.end);
 
-                    // We can return early if UseFirst is set
-                    if last_value_candidate.is_some()
-                        && self.duplicate_keys == DuplicateKeyStrategy::UseFirst
-                    {
-                        bytes_processed += bytes_read;
-                        if in_section && !line.trim().is_empty() {
-                            last_in_section = Some(bytes_processed);
-                        }
-                        return Ok(ValueByteRangeResult {
-                            file_size_bytes: bytes_processed,
-                            last_byte_in_section: last_in_section,
-                            value_range: last_value_candidate,
-                        });
+                // We can return early if UseFirst is set
+                if last_value_candidate.is_some()
+                    && self.duplicate_keys == DuplicateKeyStrategy::UseFirst
+                {
+                    bytes_processed += bytes_read;
+                    if in_section && !line.trim().is_empty() {
+                        last_in_section = Some(bytes_processed);
                     }
+                    return Ok(ValueByteRangeResult {
+                        file_size_bytes: bytes_processed,
+                        last_byte_in_section: last_in_section,
+                        value_range: last_value_candidate,
+                    });
                 }
             }
             bytes_processed += bytes_read;

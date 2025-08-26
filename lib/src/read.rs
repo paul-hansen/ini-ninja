@@ -159,24 +159,22 @@ impl IniParser<'_> {
                 // Since this_section is some here, we know we aren't in the global section
                 *in_section = false;
             }
-        } else if *in_section {
-            if let Some(range) = self.try_value(&line, key) {
-                let had_previous = value.is_some();
-                *value = Some(line[range].to_string());
-                match self.duplicate_keys {
-                    DuplicateKeyStrategy::Error => {
-                        if had_previous {
-                            return Err(Error::DuplicateKey {
-                                key: key.to_string(),
-                                section: section.map(|s| s.to_owned()),
-                            });
-                        }
+        } else if *in_section && let Some(range) = self.try_value(&line, key) {
+            let had_previous = value.is_some();
+            *value = Some(line[range].to_string());
+            match self.duplicate_keys {
+                DuplicateKeyStrategy::Error => {
+                    if had_previous {
+                        return Err(Error::DuplicateKey {
+                            key: key.to_string(),
+                            section: section.map(|s| s.to_owned()),
+                        });
                     }
-                    DuplicateKeyStrategy::UseFirst => {
-                        return Ok(true);
-                    }
-                    _ => {}
                 }
+                DuplicateKeyStrategy::UseFirst => {
+                    return Ok(true);
+                }
+                _ => {}
             }
         }
 

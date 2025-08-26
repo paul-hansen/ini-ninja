@@ -70,7 +70,9 @@ impl IniParser<'_> {
                 break;
             };
             let mut line = line?;
-            if let Some(line2) = line.strip_suffix('\\') {
+            if self.line_continuation
+                && let Some(line2) = line.strip_suffix('\\')
+            {
                 line = line2.to_string();
                 for next_line in lines.by_ref() {
                     let next_line = next_line?;
@@ -117,7 +119,9 @@ impl IniParser<'_> {
             };
             let mut line = line;
             // Handle line continuation
-            if let Some(line2) = line.strip_suffix('\\') {
+            if self.line_continuation
+                && let Some(line2) = line.strip_suffix('\\')
+            {
                 line = line2.to_string();
                 while let Some(next_line) = lines.next_line().await? {
                     let next_line = next_line.trim_start();
@@ -419,7 +423,7 @@ mod tests {
 
     read_value_eq! {
         read_value_multiline,
-        IniParser::default(),
+        IniParser{ line_continuation: true, ..Default::default() },
         r#"
             description = "a longer \
             value \
@@ -429,6 +433,14 @@ mod tests {
         None,
         "description",
         Some("a longer value spanning multiple lines".to_string()),
+    }
+    read_value_eq! {
+        read_value_multiline_disabled_trailing_slash,
+        IniParser{line_continuation: false, ..Default::default()},
+        "# Comment with trailing backslash \\\r\nMap=Muldraugh, KY\r\n",
+        None,
+        "Map",
+        Some("Muldraugh, KY".to_string()),
     }
 
     /// A test ini file that has duplicate entries including a duplicate section with the same key

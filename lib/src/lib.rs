@@ -137,7 +137,7 @@ pub struct IniParser<'a> {
     /// It's very uncommon that this isn't `=`.
     pub value_start_delimiters: &'a [char],
     /// If true, lines ending with `\` will consider the next line part of the
-    /// current line. This allows multiline values.
+    /// current line. This allows multiline values or comments.
     pub line_continuation: bool,
     /// How should we handle duplicate keys in the ini file?
     pub duplicate_keys: DuplicateKeyStrategy,
@@ -150,7 +150,7 @@ impl Default for IniParser<'_> {
             comment_delimiters: &['#', ';'],
             trailing_comments: true,
             value_start_delimiters: &['='],
-            line_continuation: true,
+            line_continuation: false,
             duplicate_keys: DuplicateKeyStrategy::default(),
         }
     }

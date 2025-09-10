@@ -241,19 +241,24 @@ impl IniParser<'_> {
         }
         loop {
             line.clear();
-            let bytes_read = source.read_line(&mut line)?;
+            let mut bytes_read = source.read_line(&mut line)?;
             if bytes_read == 0 {
                 break;
             }
             if line.trim().ends_with('\\') {
-                while source.read_line(&mut next_line)? != 0 {
-                    let next_line = next_line.trim_start();
-                    line.push_str(next_line);
-                    if let Some(line2) = line.strip_suffix('\\') {
-                        line = line2.to_string();
-                    } else {
+                loop {
+                    let bytes_read_continuation = source.read_line(&mut next_line)?;
+                    if bytes_read_continuation == 0 {
                         break;
                     }
+                    bytes_read += bytes_read_continuation;
+                    if next_line.trim_end().ends_with('\\') {
+                        line.push_str(&next_line);
+                    } else {
+                        line.push_str(&next_line);
+                        break;
+                    }
+                    next_line.clear();
                 }
             }
             if let Some(this_section) = try_section_from_line(&line) {
@@ -318,21 +323,27 @@ impl IniParser<'_> {
         }
         loop {
             line.clear();
-            let bytes_read = source.read_line(&mut line).await?;
+            let mut bytes_read = source.read_line(&mut line).await?;
             if bytes_read == 0 {
                 break;
             }
             if line.trim().ends_with('\\') {
-                while source.read_line(&mut next_line).await? != 0 {
-                    let next_line = next_line.trim_start();
-                    line.push_str(next_line);
-                    if let Some(line2) = line.strip_suffix('\\') {
-                        line = line2.to_string();
-                    } else {
+                loop {
+                    let bytes_read_continuation = source.read_line(&mut next_line).await?;
+                    if bytes_read_continuation == 0 {
                         break;
                     }
+                    bytes_read += bytes_read_continuation;
+                    if next_line.trim_end().ends_with('\\') {
+                        line.push_str(&next_line);
+                    } else {
+                        line.push_str(&next_line);
+                        break;
+                    }
+                    next_line.clear();
                 }
             }
+
             if let Some(this_section) = try_section_from_line(&line) {
                 if let Some(section) = section {
                     in_section = section == this_section;
@@ -590,23 +601,45 @@ mod tests {
     }
 
     write_value_eq! {
+        test_name=write_value_line_continuation_comment,
+        input=indoc!{"
+            [contact]
+            # this is a \\
+            multiline comment
+            test=hello
+        "},
+        section=Some("contact"),
+        key="test",
+        value="goodbye",
+        expected=indoc!{"
+            [contact]
+            # this is a \\
+            multiline comment
+            test=goodbye
+        "},
+        description="",
+        parser=IniParser{line_continuation:true, ..Default::default()}
+    }
+
+    write_value_eq! {
         test_name=write_value_line_continuation,
         input=indoc!{"
             [contact]
-            description=first line \
-            second line \
+            description=first line \\
+            second line \\
             third line
             another_key=another value
         "},
         section=Some("contact"),
         key="description",
         value="hello world",
-        expected=indoc!{"
+        expected=indoc!{r#"
             [contact]
             description=hello world
             another_key=another value
-        "},
+        "#},
         description="expected all of the lines for the value to be changed to `hello world`",
+        parser=IniParser{line_continuation:true, ..Default::default()},
     }
 
     write_value_eq! {

@@ -431,12 +431,34 @@ mod tests {
         Some("a longer value spanning multiple lines".to_string()),
     }
     read_value_eq! {
-        read_value_multiline_disabled_trailing_slash,
+        read_value_multiline_disabled_trailing_slash_windows,
         IniParser{line_continuation: false, ..Default::default()},
         "# Comment with trailing backslash \\\r\nMap=Muldraugh, KY\r\n",
         None,
         "Map",
         Some("Muldraugh, KY".to_string()),
+    }
+
+    read_value_eq! {
+        windows_newlines,
+        IniParser::default(),
+        "test=hello\r\ntest2=world",
+        None,
+        "test2",
+        Some("world".to_string()),
+    }
+
+    read_value_eq! {
+        read_value_multiline_disabled_trailing_slash,
+        IniParser{line_continuation: false, ..Default::default()},
+        r#"
+            # Comment with trailing backslash\\
+            Map=Muldraugh, KY
+            Next=Other
+        "#,
+        None,
+        "Next",
+        Some("Other".to_string()),
     }
 
     /// A test ini file that has duplicate entries including a duplicate section with the same key

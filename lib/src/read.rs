@@ -103,8 +103,6 @@ impl IniParser<'_> {
         section: Option<&str>,
         key: &str,
     ) -> Result<Option<String>, Error> {
-        // TODO: Ideally this would return Error::TooLarge instead of silently truncating
-
         let buffer = Box::pin(tokio::io::BufReader::new(source));
 
         // Are we in the section we are looking for?
